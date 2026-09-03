@@ -45,49 +45,65 @@ fn test_at_003_and_004_hover_and_deadzone() {
 }
 
 #[test]
-fn test_commit_and_unified_cancel() {
+fn test_at_005a_win_release_commit() {
+    let mut fsm = InteractionFsm::new(GeometryConfig::default());
+    let anchor = Point::new(200, 200);
+    fsm.transition(InteractionEvent::WinEscDown(anchor));
+
+    // Release Win while cursor is in valid sector (e.g. East at 260, 200) with no keys remaining -> IDLE
+    let eff = fsm.transition(InteractionEvent::WinUp(Point::new(260, 200), false));
+    assert_eq!(eff, InteractionEffect::Committed(Sector::E));
+    assert_eq!(fsm.state, State::Idle);
+
+    // Release Win while cursor in valid sector with Esc still held -> WAIT_RELEASE
+    fsm.transition(InteractionEvent::WinEscDown(anchor));
+    let eff = fsm.transition(InteractionEvent::WinUp(Point::new(260, 200), true));
+    assert_eq!(eff, InteractionEffect::Committed(Sector::E));
+    assert_eq!(fsm.state, State::WaitRelease);
+}
+
+#[test]
+fn test_at_005b_esc_release_noop() {
+    let mut fsm = InteractionFsm::new(GeometryConfig::default());
+    let anchor = Point::new(200, 200);
+    fsm.transition(InteractionEvent::WinEscDown(anchor));
+
+    // Esc release produces no FSM event / leaves state unchanged
+    assert_eq!(fsm.state, State::Active { anchor, hover: None });
+}
+
+#[test]
+fn test_at_006_left_click_commit() {
     let mut fsm = InteractionFsm::new(GeometryConfig::default());
     let anchor = Point::new(100, 100);
     fsm.transition(InteractionEvent::WinEscDown(anchor));
 
     // Click in valid sector S (y = 150, distance 50: within [32, 180])
-    let eff = fsm.transition(InteractionEvent::LButtonDown(Point::new(100, 150)));
+    let eff = fsm.transition(InteractionEvent::LButtonDown(Point::new(100, 150), false));
     assert_eq!(eff, InteractionEffect::Committed(Sector::S));
     assert_eq!(fsm.state, State::Idle);
+}
 
-    // Test click beyond outer radius -> Unified Cancel
+#[test]
+fn test_at_007_out_of_bounds_click() {
+    let mut fsm = InteractionFsm::new(GeometryConfig::default());
+    let anchor = Point::new(100, 100);
     fsm.transition(InteractionEvent::WinEscDown(anchor));
-    let eff = fsm.transition(InteractionEvent::LButtonDown(Point::new(100, 5000)));
-    assert_eq!(eff, InteractionEffect::Cancelled);
-    assert_eq!(fsm.state, State::Idle);
 
-    // Test click inside deadzone -> Unified Cancel
-    fsm.transition(InteractionEvent::WinEscDown(anchor));
-    let eff = fsm.transition(InteractionEvent::LButtonDown(Point::new(100, 110)));
+    // Left click outside radius (5000px away) -> Unified Cancel
+    let eff = fsm.transition(InteractionEvent::LButtonDown(Point::new(100, 5000), false));
     assert_eq!(eff, InteractionEffect::Cancelled);
     assert_eq!(fsm.state, State::Idle);
 }
 
 #[test]
-fn test_win_release_commit_or_cancel() {
+fn test_at_008_deadzone_click() {
     let mut fsm = InteractionFsm::new(GeometryConfig::default());
-    let anchor = Point::new(200, 200);
+    let anchor = Point::new(100, 100);
     fsm.transition(InteractionEvent::WinEscDown(anchor));
 
-    // Release Win while cursor is in valid sector (e.g. East at 260, 200) -> Commit(E)
-    let eff = fsm.transition(InteractionEvent::WinUp(Point::new(260, 200)));
-    assert_eq!(eff, InteractionEffect::Committed(Sector::E));
-    assert_eq!(fsm.state, State::Idle);
-
-    // Release Win while cursor is in deadzone (e.g. at 205, 205) -> Cancel
-    fsm.transition(InteractionEvent::WinEscDown(anchor));
-    let eff = fsm.transition(InteractionEvent::WinUp(Point::new(205, 205)));
-    assert_eq!(eff, InteractionEffect::Cancelled);
-    assert_eq!(fsm.state, State::Idle);
-
-    // Release Win while cursor is out-of-bounds (e.g. at 1000, 1000) -> Cancel
-    fsm.transition(InteractionEvent::WinEscDown(anchor));
-    let eff = fsm.transition(InteractionEvent::WinUp(Point::new(1000, 1000)));
+    // Left click inside deadzone (distance 10 < 32) -> Unified Cancel
+    let eff = fsm.transition(InteractionEvent::LButtonDown(Point::new(100, 110), false));
     assert_eq!(eff, InteractionEffect::Cancelled);
     assert_eq!(fsm.state, State::Idle);
 }
@@ -99,7 +115,7 @@ fn test_at_009_right_click_cancels() {
     fsm.transition(InteractionEvent::WinEscDown(anchor));
 
     // Right click anywhere cancels
-    let eff = fsm.transition(InteractionEvent::RButtonDown(Point::new(200, 200)));
+    let eff = fsm.transition(InteractionEvent::RButtonDown(Point::new(200, 200), false));
     assert_eq!(eff, InteractionEffect::Cancelled);
     assert_eq!(fsm.state, State::Idle);
 }
@@ -125,4 +141,32 @@ fn test_at_015_fatal_error() {
     let eff = fsm.transition(InteractionEvent::FatalError);
     assert_eq!(eff, InteractionEffect::Cancelled);
     assert_eq!(fsm.state, State::Idle);
+}
+
+#[test]
+fn test_at_019_wait_release_and_rearm() {
+    let mut fsm = InteractionFsm::new(GeometryConfig::default());
+    let anchor = Point::new(200, 200);
+    fsm.transition(InteractionEvent::WinEscDown(anchor));
+
+    // Commit while activation keys held -> WaitRelease
+    let eff = fsm.transition(InteractionEvent::LButtonDown(Point::new(260, 200), true));
+    assert_eq!(eff, InteractionEffect::Committed(Sector::E));
+    assert_eq!(fsm.state, State::WaitRelease);
+    assert!(fsm.is_waiting_release());
+
+    // Activation attempt while in WaitRelease is ignored
+    let eff = fsm.transition(InteractionEvent::WinEscDown(Point::new(300, 300)));
+    assert_eq!(eff, InteractionEffect::None);
+    assert_eq!(fsm.state, State::WaitRelease);
+
+    // All keys released -> re-arms to Idle
+    let eff = fsm.transition(InteractionEvent::AllKeysUp);
+    assert_eq!(eff, InteractionEffect::Rearmed);
+    assert_eq!(fsm.state, State::Idle);
+
+    // Now activation works again
+    let eff = fsm.transition(InteractionEvent::WinEscDown(Point::new(300, 300)));
+    assert_eq!(eff, InteractionEffect::Activated { anchor: Point::new(300, 300) });
+    assert_eq!(fsm.state, State::Active { anchor: Point::new(300, 300), hover: None });
 }

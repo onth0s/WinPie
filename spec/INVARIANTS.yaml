@@ -39,11 +39,19 @@ invariants:
       No input-processing gap exists after ACTIVE begins in which a
       resolving button event can escape.
 
+  - id: INV-INPUT-007
+    category: input
+    severity: critical
+    statement: >
+      After resolution while any activation key remains physically held,
+      WinPie enters WAIT_RELEASE and remains disarmed until all activation keys
+      have been released.
+
   - id: INV-STATE-001
     category: state
     severity: critical
     statement: >
-      ACTIVE always terminates in IDLE through commit, cancel, or fatal error.
+      ACTIVE always terminates in IDLE (or WAIT_RELEASE) through commit, cancel, or fatal error.
 
   - id: INV-STATE-002
     category: state

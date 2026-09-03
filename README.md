@@ -48,11 +48,22 @@ WinPie provides global, focus-preserving radial menu invocation anchored to the 
         │                │                │
         └────────────────┴────────────────┘
                          │
-                         ▼
-                  ┌─────────────┐
-                  │    IDLE     │
-                  └─────────────┘
+          Any activation keys still held?
+                     /       \
+                Yes /         \ No
+                   ▼           ▼
+           ┌──────────────┐    │
+           │ WAIT_RELEASE │    │
+           └──────┬───────┘    │
+                  │            │
+            All keys up        │
+                  │            │
+                  ▼            ▼
+               ┌──────────────────┐
+               │       IDLE       │
+               └──────────────────┘
 ```
+
 
 ---
 

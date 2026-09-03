@@ -349,32 +349,30 @@ Use:
 WH_KEYBOARD_LL
 ```
 
-The hook callback must be minimal.
+The hook callback must remain minimal, strictly dividing work into two tiers:
 
-Conceptually:
+1. **Synchronous Hook Boundary (`< 1 µs`)**:
+   - Classify input event and virtual key/mouse button.
+   - Atomically check and update minimal consumption flags (`IS_ACTIVE`, `REQUIRE_KEY_RELEASE`).
+   - Disarm shell shortcuts if qualifying activation gesture.
+   - Post thread message (`PostThreadMessageW`) to delegate application consequences.
+   - Return non-zero synchronously (`1`) to swallow the event before OS/foreground delivery.
 
-```rust
-fn keyboard_hook(event: KeyboardEvent) -> HookResult
-```
+2. **Asynchronous Application / Message-Pump Boundary**:
+   - Window show, hide, and repositioning (`SetWindowPos`, `ShowWindow`).
+   - Direct blits of pre-rasterized bitmaps via `UpdateLayeredWindow`.
+   - Structured diagnostics logging.
+   - Action execution and full FSM state tracking.
 
-Responsibilities:
-
-1. identify relevant key transition;
-2. update modifier state;
-3. recognize activation;
-4. consume only events required by the interaction contract;
-5. return immediately.
-
-The callback must **not**:
+The hook callback must **not**:
 
 * render;
-* allocate unnecessarily;
+* allocate on the heap unnecessarily;
 * execute actions;
 * perform blocking I/O;
 * perform expensive logging;
 * perform arbitrary application logic.
 
-State transitions and window-management work should occur outside the hook callback where practical.
 
 ---
 
@@ -849,31 +847,29 @@ No 60/120/240 Hz render loop is required.
 The interaction result is explicitly distinct from hover state.
 
 ```rust
-enum Resolution {
+pub enum Resolution {
     Commit(Sector),
     Cancel,
 }
 ```
 
-A left-click inside the deadzone produces:
+Resolution occurs within the valid sector ring:
 
 ```text
-NoOp
+hover:
+    inside deadzone or outside radius → None
+    inside sector ring                → Some(sector)
+
+commit attempt (Left-Click or Win-UP):
+    inside deadzone or outside radius → Cancel
+    inside sector ring                → Commit(sector)
+
+cancel (Right-Click):
+    anywhere                          → Cancel
 ```
 
-and leaves the interaction `ACTIVE`.
+There is no `NoOp` state in the resolution model; out-of-bounds clicks and deadzone clicks immediately cancel the interaction.
 
-Therefore the complete resolution model is:
-
-```rust
-enum MouseResolution {
-    Commit(Sector),
-    Cancel,
-    NoOp,
-}
-```
-
-`NoOp` is not equivalent to `Cancel`.
 
 ---
 
@@ -1262,49 +1258,69 @@ hover_selection == NONE
 state == ACTIVE
 ```
 
-### AT-005 — Keyboard release
+### AT-005a — Win release resolution
 
-Release Win and Esc.
+While ACTIVE, release Win key.
+
+Expected:
+
+```text
+if cursor is within valid sector ring:
+    Commit(expected_sector)
+else:
+    Cancel
+
+state == IDLE (or WAIT_RELEASE if other keys held)
+overlay == hidden
+```
+
+### AT-005b — Esc release no-op
+
+While ACTIVE, release Esc key while Win remains held.
 
 Expected:
 
 ```text
 state == ACTIVE
+overlay == visible
 ```
 
 ### AT-006 — Valid left click
 
-Move outside deadzone and left-click.
+Move into valid sector ring (deadzone < r <= radius) and left-click.
 
 Expected:
 
 ```text
 Commit(expected_sector)
-state == IDLE
+state == IDLE (or WAIT_RELEASE if keys held)
 overlay == hidden
 ```
 
-### AT-007 — Far-radius left click
+### AT-007 — Out-of-bounds left click
 
-Left-click outside the visual outer radius along a valid angle.
+Left-click outside the visual outer radius ($r > 180\text{px}$).
 
 Expected:
 
 ```text
-Commit(expected_sector)
+Cancel
+state == IDLE (or WAIT_RELEASE if keys held)
+overlay == hidden
 ```
 
 ### AT-008 — Deadzone left click
 
-Left-click inside deadzone.
+Left-click inside deadzone ($r \le 32\text{px}$).
 
 Expected:
 
 ```text
-NoOp
-state == ACTIVE
-overlay == visible
+Cancel
+state == IDLE (or WAIT_RELEASE if keys held)
+overlay == hidden
 ```
+
 
 ### AT-009 — Right-click
 
@@ -1401,6 +1417,20 @@ no unintended Start-menu invocation
 no unintended shell shortcut
 ```
 
+### AT-019 — Re-arm / Wait Release
+
+Resolve or cancel the menu while activation keys (<kbd>Win</kbd> or <kbd>Esc</kbd>) remain physically depressed.
+
+Expected:
+
+```text
+state == WAIT_RELEASE
+overlay == hidden
+reactivation while in WAIT_RELEASE is ignored
+all activation keys released -> state == IDLE (re-armed)
+```
+
+
 ---
 
 # 32. Performance Requirements
@@ -1429,25 +1459,30 @@ The POC is complete when all of the following hold:
                     Win + Esc
                         │
                         ▼
-                 ┌────────────┐
-                 │    ACTIVE  │
-                 └─────┬──────┘
-                       │
-              cursor movement
-                       │
-                       ▼
-                 hover sector
-                       │
-              ┌────────┴────────┐
-              │                 │
-          left-click        right-click
-              │                 │
-              ▼                 ▼
-           commit             cancel
-              │                 │
-              └────────┬────────┘
-                       ▼
-                    IDLE
+                     ACTIVE
+                        │
+          ┌─────────────┼─────────────┐
+          │             │             │
+       movement      Win UP         click
+          │             │             │
+          ▼             ▼             ▼
+        hover       resolve        resolve
+                        │             │
+                  ┌─────┴─────┐ ┌─────┴─────┐
+                  │           │ │           │
+                valid      invalid       valid
+                  │           │ │           │
+               COMMIT      CANCEL       COMMIT
+                  │           │ │           │
+                  └──────┬────┘ └────┬──────┘
+                         │             │
+                         └──────┬──────┘
+                                ▼
+                         WAIT_RELEASE*
+                                │
+                         all keys up
+                                ▼
+                              IDLE
 ```
 
 Specifically:
@@ -1460,21 +1495,22 @@ Specifically:
 * [x] Overlay is visually transparent outside the wheel.
 * [x] Overlay does not become the effective pointer target.
 * [x] Eight sectors are rendered with anti-aliasing and constant spoke widths.
-* [x] Cursor movement updates hover state via precomputed 0ms bitmap cache.
+* [x] Hover updates utilize pre-rasterized bitmap cache (no on-the-fly rasterization).
 * [x] Deadzone and outer bounds produce `NONE` hover.
 * [x] Left-click or Win-up within slice bounds commits by angle.
 * [x] Left-click in deadzone or out of bounds cancels (unified cancel).
 * [x] Right-click cancels anywhere.
 * [x] Resolving button events cannot leak to the foreground application.
 * [x] Esc release is a no-op; Win release resolves the interaction.
-* [x] Keys held after cancel require re-press before next activation.
+* [x] Keys held after cancel enter WAIT_RELEASE until physically released.
 * [x] Rotation changes sector boundaries.
 * [x] Multi-monitor physical coordinates behave correctly.
 * [x] Commit/cancel always tears down the interaction.
 * [x] Fatal errors return to `IDLE`.
 * [x] No supported interaction sequence leaves the wheel permanently active.
 * [x] Geometry tests pass.
-* [x] Interaction tests pass.
+* [x] Interaction tests pass (including AT-005a/b, AT-007, AT-008, and AT-019).
+
 
 ---
 

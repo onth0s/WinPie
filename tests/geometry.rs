@@ -1,6 +1,6 @@
 use winpie::geometry::{
     angle_from_north_degrees, classify_angle, evaluate_commit, evaluate_hover,
-    GeometryConfig, MouseResolution, Point, Sector,
+    GeometryConfig, Point, Resolution, Sector,
 };
 
 #[test]
@@ -69,15 +69,15 @@ fn test_negative_multimonitor_coordinates() {
 
     // Cursor inside deadzone -> Cancel
     assert_eq!(evaluate_hover(center, Point::new(-1000, -500), &config), None);
-    assert_eq!(evaluate_commit(center, Point::new(-1000, -500), &config), MouseResolution::Cancel);
+    assert_eq!(evaluate_commit(center, Point::new(-1000, -500), &config), Resolution::Cancel);
 
     // Cursor South inside valid slice bounds (dy = +100) -> Commit(S)
     assert_eq!(evaluate_hover(center, Point::new(-1000, -400), &config), Some(Sector::S));
-    assert_eq!(evaluate_commit(center, Point::new(-1000, -400), &config), MouseResolution::Commit(Sector::S));
+    assert_eq!(evaluate_commit(center, Point::new(-1000, -400), &config), Resolution::Commit(Sector::S));
 
     // Cursor West inside valid slice bounds (dx = -100) -> Commit(W)
     assert_eq!(evaluate_hover(center, Point::new(-1100, -500), &config), Some(Sector::W));
-    assert_eq!(evaluate_commit(center, Point::new(-1100, -500), &config), MouseResolution::Commit(Sector::W));
+    assert_eq!(evaluate_commit(center, Point::new(-1100, -500), &config), Resolution::Commit(Sector::W));
 }
 
 #[test]
@@ -86,11 +86,11 @@ fn test_unified_cancel_bounds() {
     let center = Point::new(0, 0);
 
     // Left-click in deadzone -> Cancel
-    assert_eq!(evaluate_commit(center, Point::new(10, 10), &config), MouseResolution::Cancel);
+    assert_eq!(evaluate_commit(center, Point::new(10, 10), &config), Resolution::Cancel);
 
     // Left-click outside radius (5000 pixels away) -> Cancel
-    assert_eq!(evaluate_commit(center, Point::new(5000, 0), &config), MouseResolution::Cancel);
+    assert_eq!(evaluate_commit(center, Point::new(5000, 0), &config), Resolution::Cancel);
 
     // Left-click in valid sector ring (radius 100, between 32 and 180) -> Commit(E)
-    assert_eq!(evaluate_commit(center, Point::new(100, 0), &config), MouseResolution::Commit(Sector::E));
+    assert_eq!(evaluate_commit(center, Point::new(100, 0), &config), Resolution::Commit(Sector::E));
 }

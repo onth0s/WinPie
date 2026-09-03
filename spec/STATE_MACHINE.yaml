@@ -1,6 +1,7 @@
 states:
   - IDLE
   - ACTIVE
+  - WAIT_RELEASE
 
 transitions:
   - from: IDLE
@@ -10,17 +11,17 @@ transitions:
 
   - from: ACTIVE
     event: LBUTTON_DOWN
-    to: IDLE
+    to: IDLE_OR_WAIT_RELEASE
     effect: COMMIT_IF_VALID_ELSE_CANCEL
 
   - from: ACTIVE
     event: WIN_UP
-    to: IDLE
+    to: IDLE_OR_WAIT_RELEASE
     effect: COMMIT_IF_VALID_ELSE_CANCEL
 
   - from: ACTIVE
     event: RBUTTON_DOWN
-    to: IDLE
+    to: IDLE_OR_WAIT_RELEASE
     effect: CANCEL
 
   - from: ACTIVE
@@ -28,3 +29,7 @@ transitions:
     to: IDLE
     effect: CANCEL
 
+  - from: WAIT_RELEASE
+    event: ALL_KEYS_UP
+    to: IDLE
+    effect: REARM

@@ -9,8 +9,8 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 use crate::diagnostics::{AppConfig, Diagnostics};
 use crate::geometry::{GeometryConfig, Point};
 use crate::input::{
-    InputManager, WM_WINPIE_ACTIVATE, WM_WINPIE_LBUTTONDOWN, WM_WINPIE_MOUSEMOVE,
-    WM_WINPIE_RBUTTONDOWN, WM_WINPIE_WINUP,
+    InputManager, WM_WINPIE_ACTIVATE, WM_WINPIE_ALLKEYSUP, WM_WINPIE_LBUTTONDOWN,
+    WM_WINPIE_MOUSEMOVE, WM_WINPIE_RBUTTONDOWN, WM_WINPIE_WINUP,
 };
 use crate::interaction::{InteractionEffect, InteractionEvent, InteractionFsm};
 use crate::overlay::OverlayWindow;
@@ -18,12 +18,10 @@ use crate::overlay::OverlayWindow;
 static APP_THREAD_ID: AtomicU32 = AtomicU32::new(0);
 
 unsafe extern "system" fn console_ctrl_handler(ctrl_type: u32) -> BOOL {
-    // 0 = CTRL_C_EVENT, 1 = CTRL_BREAK_EVENT, 2 = CTRL_CLOSE_EVENT
     if ctrl_type == 0 || ctrl_type == 1 || ctrl_type == 2 {
         let tid = APP_THREAD_ID.load(Ordering::SeqCst);
         if tid != 0 {
             let _ = PostThreadMessageW(tid, WM_QUIT, windows::Win32::Foundation::WPARAM(0), LPARAM(0));
-            // Return TRUE to indicate we handled the control signal and are exiting gracefully
             return BOOL(1);
         }
     }
@@ -41,7 +39,6 @@ pub struct Application {
 
 impl Application {
     pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
-        // Section 6: DPI awareness for physical screen coordinates
         unsafe {
             let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         }
@@ -109,6 +106,9 @@ impl Application {
                     WM_WINPIE_RBUTTONDOWN => {
                         self.handle_rbuttondown();
                     }
+                    WM_WINPIE_ALLKEYSUP => {
+                        self.handle_allkeysup();
+                    }
                     WM_QUIT => {
                         break;
                     }
@@ -141,15 +141,13 @@ impl Application {
     }
 
     fn handle_lbuttondown(&mut self, pt: Point) {
-        let effect = self.fsm.transition(InteractionEvent::LButtonDown(pt));
+        let keys_held = InputManager::are_keys_held();
+        let effect = self.fsm.transition(InteractionEvent::LButtonDown(pt, keys_held));
         match effect {
             InteractionEffect::Committed(sector) => {
                 self.diagnostics.log_commit(sector);
                 self.overlay.hide();
                 self.input_manager.set_active(false);
-            }
-            InteractionEffect::NoOpInDeadzone => {
-                self.input_manager.set_active(true);
             }
             InteractionEffect::Cancelled => {
                 self.diagnostics.log_cancel();
@@ -161,7 +159,8 @@ impl Application {
     }
 
     fn handle_winup(&mut self, pt: Point) {
-        let effect = self.fsm.transition(InteractionEvent::WinUp(pt));
+        let keys_held = InputManager::are_keys_held();
+        let effect = self.fsm.transition(InteractionEvent::WinUp(pt, keys_held));
         match effect {
             InteractionEffect::Committed(sector) => {
                 self.diagnostics.log_commit(sector);
@@ -178,10 +177,15 @@ impl Application {
     }
 
     fn handle_rbuttondown(&mut self) {
-        let _ = self.fsm.transition(InteractionEvent::RButtonDown(Point::default()));
+        let keys_held = InputManager::are_keys_held();
+        let _ = self.fsm.transition(InteractionEvent::RButtonDown(Point::default(), keys_held));
         self.diagnostics.log_cancel();
         self.overlay.hide();
         self.input_manager.set_active(false);
+    }
+
+    fn handle_allkeysup(&mut self) {
+        let _ = self.fsm.transition(InteractionEvent::AllKeysUp);
     }
 }
 

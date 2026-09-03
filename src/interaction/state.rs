@@ -1,4 +1,4 @@
-use crate::geometry::{evaluate_commit, evaluate_hover, GeometryConfig, MouseResolution, Point, Sector};
+use crate::geometry::{evaluate_commit, evaluate_hover, GeometryConfig, Point, Resolution, Sector};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum State {
@@ -7,15 +7,17 @@ pub enum State {
         anchor: Point,
         hover: Option<Sector>,
     },
+    WaitRelease,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InteractionEvent {
     WinEscDown(Point),
     MouseMove(Point),
-    LButtonDown(Point),
-    RButtonDown(Point),
-    WinUp(Point),
+    LButtonDown(Point, bool /* keys_held */),
+    RButtonDown(Point, bool /* keys_held */),
+    WinUp(Point, bool /* keys_held */),
+    AllKeysUp,
     FatalError,
 }
 
@@ -26,7 +28,7 @@ pub enum InteractionEffect {
     HoverChanged { from: Option<Sector>, to: Option<Sector> },
     Committed(Sector),
     Cancelled,
-    NoOpInDeadzone,
+    Rearmed,
 }
 
 #[derive(Debug, Clone)]
@@ -47,21 +49,25 @@ impl InteractionFsm {
         matches!(self.state, State::Active { .. })
     }
 
+    pub fn is_waiting_release(&self) -> bool {
+        matches!(self.state, State::WaitRelease)
+    }
+
     pub fn active_anchor(&self) -> Option<Point> {
         match self.state {
             State::Active { anchor, .. } => Some(anchor),
-            State::Idle => None,
+            _ => None,
         }
     }
 
     pub fn hover_selection(&self) -> Option<Sector> {
         match self.state {
             State::Active { hover, .. } => hover,
-            State::Idle => None,
+            _ => None,
         }
     }
 
-    /// Pure transition function
+    /// Pure transition function adhering to STATE_MACHINE.yaml
     pub fn transition(&mut self, event: InteractionEvent) -> InteractionEffect {
         match (self.state, event) {
             (State::Idle, InteractionEvent::WinEscDown(anchor)) => {
@@ -72,9 +78,14 @@ impl InteractionFsm {
                 InteractionEffect::Activated { anchor }
             }
 
-            // Already active: WinEscDown does not reactivate or create secondary wheels
-            (State::Active { .. }, InteractionEvent::WinEscDown(_)) => {
-                InteractionEffect::None
+            // In WaitRelease or Active: ignore activation attempts
+            (State::WaitRelease, InteractionEvent::WinEscDown(_)) => InteractionEffect::None,
+            (State::Active { .. }, InteractionEvent::WinEscDown(_)) => InteractionEffect::None,
+
+            // All keys up re-arms to Idle
+            (State::WaitRelease, InteractionEvent::AllKeysUp) => {
+                self.state = State::Idle;
+                InteractionEffect::Rearmed
             }
 
             (State::Active { anchor, hover }, InteractionEvent::MouseMove(cursor)) => {
@@ -93,35 +104,27 @@ impl InteractionFsm {
                 }
             }
 
-            (State::Active { anchor, .. }, InteractionEvent::LButtonDown(cursor)) => {
+            (State::Active { anchor, .. }, InteractionEvent::LButtonDown(cursor, keys_held)) => {
                 let resolution = evaluate_commit(anchor, cursor, &self.config);
+                self.state = if keys_held { State::WaitRelease } else { State::Idle };
                 match resolution {
-                    MouseResolution::Commit(sector) => {
-                        self.state = State::Idle;
-                        InteractionEffect::Committed(sector)
-                    }
-                    MouseResolution::NoOp => {
-                        InteractionEffect::NoOpInDeadzone
-                    }
-                    MouseResolution::Cancel => {
-                        self.state = State::Idle;
-                        InteractionEffect::Cancelled
-                    }
+                    Resolution::Commit(sector) => InteractionEffect::Committed(sector),
+                    Resolution::Cancel => InteractionEffect::Cancelled,
                 }
             }
 
-            // On Win release: if cursor is in valid bounds (hover is Some(Sector)), commit it; otherwise cancel
-            (State::Active { anchor, .. }, InteractionEvent::WinUp(cursor)) => {
+            // On Win release: if cursor is in valid bounds, commit; otherwise cancel
+            (State::Active { anchor, .. }, InteractionEvent::WinUp(cursor, keys_held)) => {
                 let resolution = evaluate_commit(anchor, cursor, &self.config);
-                self.state = State::Idle;
+                self.state = if keys_held { State::WaitRelease } else { State::Idle };
                 match resolution {
-                    MouseResolution::Commit(sector) => InteractionEffect::Committed(sector),
-                    _ => InteractionEffect::Cancelled,
+                    Resolution::Commit(sector) => InteractionEffect::Committed(sector),
+                    Resolution::Cancel => InteractionEffect::Cancelled,
                 }
             }
 
-            (State::Active { .. }, InteractionEvent::RButtonDown(_)) => {
-                self.state = State::Idle;
+            (State::Active { .. }, InteractionEvent::RButtonDown(_, keys_held)) => {
+                self.state = if keys_held { State::WaitRelease } else { State::Idle };
                 InteractionEffect::Cancelled
             }
 
@@ -130,8 +133,8 @@ impl InteractionFsm {
                 InteractionEffect::Cancelled
             }
 
-            // Unhandled events while Idle produce no effect
-            (State::Idle, _) => InteractionEffect::None,
+            // Unhandled events while Idle or WaitRelease produce no effect
+            _ => InteractionEffect::None,
         }
     }
 }

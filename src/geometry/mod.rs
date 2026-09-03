@@ -88,10 +88,9 @@ impl Default for GeometryConfig {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MouseResolution {
+pub enum Resolution {
     Commit(Sector),
     Cancel,
-    NoOp,
 }
 
 /// Normalizes any angle in degrees into [0.0, 360.0).
@@ -143,7 +142,7 @@ pub fn evaluate_hover(center: Point, cursor: Point, config: &GeometryConfig) -> 
 /// - Inside deadzone (r^2 <= deadzone^2): Cancel (unified cancel condition)
 /// - Outside outer radius (r^2 > radius^2): Cancel (unified cancel condition)
 /// - Within slice ring (deadzone < r <= radius): Commit(Sector)
-pub fn evaluate_commit(center: Point, cursor: Point, config: &GeometryConfig) -> MouseResolution {
+pub fn evaluate_commit(center: Point, cursor: Point, config: &GeometryConfig) -> Resolution {
     let dx = (cursor.x - center.x) as f64;
     let dy = (cursor.y - center.y) as f64;
     let r2 = dx * dx + dy * dy;
@@ -151,10 +150,11 @@ pub fn evaluate_commit(center: Point, cursor: Point, config: &GeometryConfig) ->
     let r_max2 = config.radius * config.radius;
 
     if r2 <= dz2 || r2 > r_max2 {
-        MouseResolution::Cancel
+        Resolution::Cancel
     } else {
         let angle = angle_from_north_degrees(dx, dy);
         let sector = classify_angle(angle, config.rotation_degrees);
-        MouseResolution::Commit(sector)
+        Resolution::Commit(sector)
     }
 }
+

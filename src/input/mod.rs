@@ -9,6 +9,7 @@ pub const WM_WINPIE_MOUSEMOVE: u32 = WM_USER + 102;
 pub const WM_WINPIE_LBUTTONDOWN: u32 = WM_USER + 103;
 pub const WM_WINPIE_RBUTTONDOWN: u32 = WM_USER + 104;
 pub const WM_WINPIE_WINUP: u32 = WM_USER + 105;
+pub const WM_WINPIE_ALLKEYSUP: u32 = WM_USER + 106;
 
 static MAIN_THREAD_ID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
@@ -22,8 +23,7 @@ static IS_ACTIVE: AtomicBool = AtomicBool::new(false);
 static LAST_POSTED_X: AtomicI32 = AtomicI32::new(i32::MIN);
 static LAST_POSTED_Y: AtomicI32 = AtomicI32::new(i32::MIN);
 
-// When cancelled/resolved while activation keys are still held, arm re-press requirement.
-// WinPie will NOT re-activate until keys are released and pressed again.
+// WAIT_RELEASE state: WinPie will NOT re-activate until keys are released and pressed again.
 static REQUIRE_KEY_RELEASE: AtomicBool = AtomicBool::new(false);
 
 pub struct InputManager {
@@ -57,13 +57,16 @@ impl InputManager {
         }
     }
 
+    pub fn are_keys_held() -> bool {
+        let win_held = LEFT_WIN_DOWN.load(Ordering::SeqCst) || RIGHT_WIN_DOWN.load(Ordering::SeqCst);
+        let esc_held = ESCAPE_DOWN.load(Ordering::SeqCst);
+        win_held || esc_held
+    }
+
     pub fn set_active(&self, active: bool) {
         IS_ACTIVE.store(active, Ordering::SeqCst);
         if !active {
-            // If Win or Escape is still held when returning to idle, require full release before next activation
-            let win_held = LEFT_WIN_DOWN.load(Ordering::SeqCst) || RIGHT_WIN_DOWN.load(Ordering::SeqCst);
-            let esc_held = ESCAPE_DOWN.load(Ordering::SeqCst);
-            if win_held || esc_held {
+            if Self::are_keys_held() {
                 REQUIRE_KEY_RELEASE.store(true, Ordering::SeqCst);
             }
         }
@@ -139,10 +142,20 @@ unsafe extern "system" fn ll_keyboard_proc(
 
         let win_held = LEFT_WIN_DOWN.load(Ordering::SeqCst) || RIGHT_WIN_DOWN.load(Ordering::SeqCst);
 
-        // Clear re-press requirement once both Win and Esc have been released
+        // Clear WAIT_RELEASE once both Win and Esc have been physically released
         if is_up {
             if !win_held && !ESCAPE_DOWN.load(Ordering::SeqCst) {
-                REQUIRE_KEY_RELEASE.store(false, Ordering::SeqCst);
+                if REQUIRE_KEY_RELEASE.swap(false, Ordering::SeqCst) {
+                    let tid = MAIN_THREAD_ID.load(Ordering::SeqCst);
+                    if tid != 0 {
+                        let _ = PostThreadMessageW(
+                            tid,
+                            WM_WINPIE_ALLKEYSUP,
+                            WPARAM(0),
+                            LPARAM(0),
+                        );
+                    }
+                }
             }
         }
 
@@ -254,9 +267,7 @@ unsafe extern "system" fn ll_mouse_proc(
                 WM_RBUTTONDOWN => {
                     IS_ACTIVE.store(false, Ordering::SeqCst);
 
-                    let win_held = LEFT_WIN_DOWN.load(Ordering::SeqCst) || RIGHT_WIN_DOWN.load(Ordering::SeqCst);
-                    let esc_held = ESCAPE_DOWN.load(Ordering::SeqCst);
-                    if win_held || esc_held {
+                    if InputManager::are_keys_held() {
                         REQUIRE_KEY_RELEASE.store(true, Ordering::SeqCst);
                     }
 
