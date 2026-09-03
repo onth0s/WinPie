@@ -12,9 +12,7 @@ use crate::geometry::{Point, Sector};
 pub struct OverlayWindow {
     hwnd: HWND,
     size: i32,
-    radius: i32,
-    deadzone: i32,
-    rotation: f64,
+    precomputed_buffers: [Vec<u32>; 9], // 0 = None (deadzone/unhovered), 1..=8 = Sector::from_index(i-1)
 }
 
 impl OverlayWindow {
@@ -62,12 +60,26 @@ impl OverlayWindow {
                 None,
             )?;
 
+            // Precompute all 9 bitmaps (0 = unhovered, 1..=8 = each sector hovered)
+            // Pre-rasterizing once on startup means hover switching during interaction is an instantaneous 0ms blit!
+            let pixel_count = (size * size) as usize;
+            let mut precomputed_buffers: [Vec<u32>; 9] = Default::default();
+
+            for i in 0..9 {
+                let hover_opt = if i == 0 {
+                    None
+                } else {
+                    Some(Sector::from_index(i - 1))
+                };
+                let mut buf = vec![0u32; pixel_count];
+                Self::rasterize_wheel_pixels(size, radius as f64, deadzone as f64, rotation, &mut buf, hover_opt);
+                precomputed_buffers[i] = buf;
+            }
+
             Ok(Self {
                 hwnd,
                 size,
-                radius,
-                deadzone,
-                rotation,
+                precomputed_buffers,
             })
         }
     }
@@ -81,7 +93,7 @@ impl OverlayWindow {
         let left = center.x - half;
         let top = center.y - half;
 
-        self.render(hover);
+        self.blit_hover(hover);
 
         unsafe {
             let _ = SetWindowPos(
@@ -103,10 +115,16 @@ impl OverlayWindow {
     }
 
     pub fn update_hover(&self, hover: Option<Sector>) {
-        self.render(hover);
+        self.blit_hover(hover);
     }
 
-    fn render(&self, hover: Option<Sector>) {
+    fn blit_hover(&self, hover: Option<Sector>) {
+        let buffer_idx = match hover {
+            None => 0,
+            Some(sector) => (sector as usize) + 1,
+        };
+        let src_pixels = &self.precomputed_buffers[buffer_idx];
+
         unsafe {
             let screen_dc = GetDC(None);
             let mem_dc = CreateCompatibleDC(screen_dc);
@@ -132,11 +150,12 @@ impl OverlayWindow {
             if let Ok(bmp) = bitmap {
                 let old_bmp = SelectObject(mem_dc, bmp);
 
-                let pixel_count = (self.size * self.size) as usize;
-                let pixels = std::slice::from_raw_parts_mut(bits_ptr as *mut u32, pixel_count);
-                pixels.fill(0);
-
-                self.draw_wheel_pixels(pixels, hover);
+                // Instant direct memory copy from precomputed buffer! (sub-microsecond)
+                std::ptr::copy_nonoverlapping(
+                    src_pixels.as_ptr(),
+                    bits_ptr as *mut u32,
+                    src_pixels.len(),
+                );
 
                 let blend = BLENDFUNCTION {
                     BlendOp: AC_SRC_ALPHA as u8,
@@ -172,16 +191,21 @@ impl OverlayWindow {
         }
     }
 
-    fn draw_wheel_pixels(&self, pixels: &mut [u32], hover: Option<Sector>) {
-        let cx = self.size as f64 / 2.0;
-        let cy = self.size as f64 / 2.0;
-        let r = self.radius as f64;
-        let dz = self.deadzone as f64;
+    fn rasterize_wheel_pixels(
+        size: i32,
+        r: f64,
+        dz: f64,
+        rotation: f64,
+        pixels: &mut [u32],
+        hover: Option<Sector>,
+    ) {
+        let cx = size as f64 / 2.0;
+        let cy = size as f64 / 2.0;
 
         // Precompute normal vectors for the 8 spoke dividing rays
         let mut spoke_normals = [(0.0f64, 0.0f64, 0.0f64, 0.0f64); 8];
         for k in 0..8 {
-            let spoke_angle_deg = (k as f64) * 45.0 - 22.5 + self.rotation;
+            let spoke_angle_deg = (k as f64) * 45.0 - 22.5 + rotation;
             let rad = spoke_angle_deg * PI / 180.0;
             let dx_ray = rad.sin();
             let dy_ray = -rad.cos();
@@ -190,7 +214,7 @@ impl OverlayWindow {
             spoke_normals[k] = (dx_ray, dy_ray, nx, ny);
         }
 
-        // 4x Supersampling offsets (rotated grid for superior anti-aliasing on curves)
+        // 4x Supersampling offsets (rotated grid)
         const SAMPLES: [(f64, f64); 4] = [
             (-0.3, -0.1),
             (0.1, -0.3),
@@ -198,12 +222,11 @@ impl OverlayWindow {
             (-0.1, 0.3),
         ];
 
-        for y in 0..self.size {
-            for x in 0..self.size {
+        for y in 0..size {
+            for x in 0..size {
                 let px = x as f64 - cx + 0.5;
                 let py = y as f64 - cy + 0.5;
 
-                // Fast distance cull
                 let approx_dist = (px * px + py * py).sqrt();
                 if approx_dist > r + 2.0 {
                     continue;
@@ -220,26 +243,17 @@ impl OverlayWindow {
                     let dist = (sx * sx + sy * sy).sqrt();
 
                     if dist > r {
-                        // Beyond circumference: completely empty
                         continue;
                     }
 
                     if dist <= dz {
-                        // Inside deadzone
+                        // Inside deadzone: smooth circular boundary, NO center dot!
                         if dist >= dz - 1.5 {
-                            // Deadzone border ring
                             let a = 220.0;
                             total_a += a;
                             total_r += 240.0 * a / 255.0;
                             total_g += 240.0 * a / 255.0;
                             total_b += 240.0 * a / 255.0;
-                        } else if dist <= 2.5 {
-                            // Center anchor crosshair dot
-                            let a = 230.0;
-                            total_a += a;
-                            total_r += 255.0 * a / 255.0;
-                            total_g += 255.0 * a / 255.0;
-                            total_b += 255.0 * a / 255.0;
                         } else {
                             // Dark translucent deadzone core
                             let a = 130.0;
@@ -251,7 +265,7 @@ impl OverlayWindow {
                     } else {
                         // Sector ring
                         let angle = crate::geometry::angle_from_north_degrees(sx, sy);
-                        let sector = crate::geometry::classify_angle(angle, self.rotation);
+                        let sector = crate::geometry::classify_angle(angle, rotation);
                         let is_hovered = hover == Some(sector);
 
                         // Spoke check
@@ -305,7 +319,7 @@ impl OverlayWindow {
                     let avg_g = (total_g / 4.0).round() as u32;
                     let avg_b = (total_b / 4.0).round() as u32;
 
-                    let idx = (y * self.size + x) as usize;
+                    let idx = (y * size + x) as usize;
                     pixels[idx] = (avg_a << 24) | (avg_r << 16) | (avg_g << 8) | avg_b;
                 }
             }

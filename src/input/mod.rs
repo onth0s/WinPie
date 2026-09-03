@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use windows::Win32::Foundation::{HMODULE, LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
@@ -17,6 +17,10 @@ static LEFT_WIN_DOWN: AtomicBool = AtomicBool::new(false);
 static RIGHT_WIN_DOWN: AtomicBool = AtomicBool::new(false);
 static ESCAPE_DOWN: AtomicBool = AtomicBool::new(false);
 static IS_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+// Deduplicate mouse movement in the hook to avoid flooding the message queue
+static LAST_POSTED_X: AtomicI32 = AtomicI32::new(i32::MIN);
+static LAST_POSTED_Y: AtomicI32 = AtomicI32::new(i32::MIN);
 
 // When cancelled/resolved while activation keys are still held, arm re-press requirement.
 // WinPie will NOT re-activate until keys are released and pressed again.
@@ -148,10 +152,13 @@ unsafe extern "system" fn ll_keyboard_proc(
             let blocked = REQUIRE_KEY_RELEASE.load(Ordering::SeqCst);
 
             if !was_active && !blocked {
-                // Mark active immediately so mouse hook consumes instantly without gap (INV-INPUT-006)
+                // Reset mouse deduplication
+                LAST_POSTED_X.store(i32::MIN, Ordering::SeqCst);
+                LAST_POSTED_Y.store(i32::MIN, Ordering::SeqCst);
+
                 IS_ACTIVE.store(true, Ordering::SeqCst);
 
-                // Disarm Windows Start menu trigger cleanly by notifying the OS that another key accompanied Win
+                // Disarm Windows Start menu trigger cleanly
                 disarm_windows_key();
 
                 let mut pt = POINT::default();
@@ -173,11 +180,9 @@ unsafe extern "system" fn ll_keyboard_proc(
         }
 
         // On Win key release while active: trigger commit or cancel check
-        // (Esc release is no-op, Win release commits if in valid bounds)
         if is_up && (vk == VK_LWIN || vk == VK_RWIN) {
             let was_active = IS_ACTIVE.load(Ordering::SeqCst);
             if was_active && !win_held {
-                // Win key has been released! Mark inactive immediately
                 IS_ACTIVE.store(false, Ordering::SeqCst);
 
                 let mut pt = POINT::default();
@@ -213,14 +218,25 @@ unsafe extern "system" fn ll_mouse_proc(
         if active {
             match msg {
                 WM_MOUSEMOVE => {
-                    let tid = MAIN_THREAD_ID.load(Ordering::SeqCst);
-                    if tid != 0 {
-                        let _ = PostThreadMessageW(
-                            tid,
-                            WM_WINPIE_MOUSEMOVE,
-                            WPARAM(0),
-                            LPARAM(((mouse.pt.y as isize) << 32) | (mouse.pt.x as u32 as isize)),
-                        );
+                    let cur_x = mouse.pt.x;
+                    let cur_y = mouse.pt.y;
+                    let prev_x = LAST_POSTED_X.load(Ordering::Relaxed);
+                    let prev_y = LAST_POSTED_Y.load(Ordering::Relaxed);
+
+                    // Deduplicate identical points to keep hook returning in <1µs
+                    if cur_x != prev_x || cur_y != prev_y {
+                        LAST_POSTED_X.store(cur_x, Ordering::Relaxed);
+                        LAST_POSTED_Y.store(cur_y, Ordering::Relaxed);
+
+                        let tid = MAIN_THREAD_ID.load(Ordering::SeqCst);
+                        if tid != 0 {
+                            let _ = PostThreadMessageW(
+                                tid,
+                                WM_WINPIE_MOUSEMOVE,
+                                WPARAM(0),
+                                LPARAM(((cur_y as isize) << 32) | (cur_x as u32 as isize)),
+                            );
+                        }
                     }
                 }
                 WM_LBUTTONDOWN => {
