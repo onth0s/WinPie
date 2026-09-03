@@ -105,22 +105,6 @@ pub fn normalize_degrees(mut deg: f64) -> f64 {
 
 /// Calculates clockwise angle from North (0 deg) in degrees:
 /// dx = x - cx, dy = y - cy
-/// In screen coordinates: x goes right (+x), y goes down (+y).
-/// North is (0, -1) -> 0 deg
-/// East is (1, 0) -> 90 deg
-/// South is (0, 1) -> 180 deg
-/// West is (-1, 0) -> 270 deg
-///
-/// Math atan2(dy, dx) returns angle from +X axis (East).
-/// In standard math:
-/// atan2(0, 1) = 0 (East)
-/// atan2(1, 0) = PI/2 (South in screen coords)
-/// To measure clockwise from North:
-/// angle = atan2(dx, -dy) in radians.
-/// When dx=0, dy=-1 (North) -> atan2(0, 1) = 0 rad = 0 deg.
-/// When dx=1, dy=0 (East)   -> atan2(1, 0) = PI/2 rad = 90 deg.
-/// When dx=0, dy=1 (South)  -> atan2(0, -1) = PI rad = 180 deg.
-/// When dx=-1, dy=0 (West)  -> atan2(-1, 0) = -PI/2 rad -> 270 deg.
 pub fn angle_from_north_degrees(dx: f64, dy: f64) -> f64 {
     let rad = dx.atan2(-dy);
     let deg = rad * 180.0 / PI;
@@ -138,15 +122,16 @@ pub fn classify_angle(theta_deg: f64, rotation_degrees: f64) -> Sector {
 }
 
 /// Evaluates hover selection.
-/// Returns None if inside deadzone (r^2 <= deadzone^2).
-/// Returns Some(Sector) if outside deadzone.
+/// Returns None if inside deadzone (r^2 <= deadzone^2) or outside outer radius (r^2 > radius^2).
+/// Returns Some(Sector) if within valid sector ring.
 pub fn evaluate_hover(center: Point, cursor: Point, config: &GeometryConfig) -> Option<Sector> {
     let dx = (cursor.x - center.x) as f64;
     let dy = (cursor.y - center.y) as f64;
     let r2 = dx * dx + dy * dy;
     let dz2 = config.deadzone * config.deadzone;
+    let r_max2 = config.radius * config.radius;
 
-    if r2 <= dz2 {
+    if r2 <= dz2 || r2 > r_max2 {
         None
     } else {
         let angle = angle_from_north_degrees(dx, dy);
@@ -154,17 +139,19 @@ pub fn evaluate_hover(center: Point, cursor: Point, config: &GeometryConfig) -> 
     }
 }
 
-/// Evaluates commit resolution on left-click:
-/// Inside deadzone: NoOp
-/// Outside deadzone: Commit(Sector)
+/// Evaluates commit / cancel resolution on left-click:
+/// - Inside deadzone (r^2 <= deadzone^2): Cancel (unified cancel condition)
+/// - Outside outer radius (r^2 > radius^2): Cancel (unified cancel condition)
+/// - Within slice ring (deadzone < r <= radius): Commit(Sector)
 pub fn evaluate_commit(center: Point, cursor: Point, config: &GeometryConfig) -> MouseResolution {
     let dx = (cursor.x - center.x) as f64;
     let dy = (cursor.y - center.y) as f64;
     let r2 = dx * dx + dy * dy;
     let dz2 = config.deadzone * config.deadzone;
+    let r_max2 = config.radius * config.radius;
 
-    if r2 <= dz2 {
-        MouseResolution::NoOp
+    if r2 <= dz2 || r2 > r_max2 {
+        MouseResolution::Cancel
     } else {
         let angle = angle_from_north_degrees(dx, dy);
         let sector = classify_angle(angle, config.rotation_degrees);

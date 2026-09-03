@@ -23,7 +23,7 @@ fn test_at_003_and_004_hover_and_deadzone() {
     assert_eq!(eff, InteractionEffect::None);
     assert_eq!(fsm.hover_selection(), None);
 
-    // Move to North (outside deadzone 32, e.g. y = 450)
+    // Move to North (outside deadzone 32, within radius 180, e.g. y = 450)
     let eff = fsm.transition(InteractionEvent::MouseMove(Point::new(500, 450)));
     assert_eq!(eff, InteractionEffect::HoverChanged { from: None, to: Some(Sector::N) });
     assert_eq!(fsm.hover_selection(), Some(Sector::N));
@@ -45,33 +45,27 @@ fn test_at_003_and_004_hover_and_deadzone() {
 }
 
 #[test]
-fn test_at_006_and_007_commit_left_click() {
+fn test_commit_and_unified_cancel() {
     let mut fsm = InteractionFsm::new(GeometryConfig::default());
     let anchor = Point::new(100, 100);
     fsm.transition(InteractionEvent::WinEscDown(anchor));
 
-    // Click in sector S (y = 150)
+    // Click in valid sector S (y = 150, distance 50: within [32, 180])
     let eff = fsm.transition(InteractionEvent::LButtonDown(Point::new(100, 150)));
     assert_eq!(eff, InteractionEffect::Committed(Sector::S));
     assert_eq!(fsm.state, State::Idle);
 
-    // Test far click beyond radius
+    // Test click beyond outer radius -> Unified Cancel
     fsm.transition(InteractionEvent::WinEscDown(anchor));
     let eff = fsm.transition(InteractionEvent::LButtonDown(Point::new(100, 5000)));
-    assert_eq!(eff, InteractionEffect::Committed(Sector::S));
+    assert_eq!(eff, InteractionEffect::Cancelled);
     assert_eq!(fsm.state, State::Idle);
-}
 
-#[test]
-fn test_at_008_deadzone_left_click_noop() {
-    let mut fsm = InteractionFsm::new(GeometryConfig::default());
-    let anchor = Point::new(100, 100);
+    // Test click inside deadzone -> Unified Cancel
     fsm.transition(InteractionEvent::WinEscDown(anchor));
-
-    // Click inside deadzone (distance = 10 < 32)
     let eff = fsm.transition(InteractionEvent::LButtonDown(Point::new(100, 110)));
-    assert_eq!(eff, InteractionEffect::NoOpInDeadzone);
-    assert!(fsm.is_active(), "Must remain active after deadzone click");
+    assert_eq!(eff, InteractionEffect::Cancelled);
+    assert_eq!(fsm.state, State::Idle);
 }
 
 #[test]
@@ -80,7 +74,7 @@ fn test_at_009_right_click_cancels() {
     let anchor = Point::new(200, 200);
     fsm.transition(InteractionEvent::WinEscDown(anchor));
 
-    // Right click anywhere (even deadzone or far away) cancels
+    // Right click anywhere cancels
     let eff = fsm.transition(InteractionEvent::RButtonDown(Point::new(200, 200)));
     assert_eq!(eff, InteractionEffect::Cancelled);
     assert_eq!(fsm.state, State::Idle);

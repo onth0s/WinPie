@@ -14,7 +14,12 @@ static MAIN_THREAD_ID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU
 // Tracks low-level key state
 static LEFT_WIN_DOWN: AtomicBool = AtomicBool::new(false);
 static RIGHT_WIN_DOWN: AtomicBool = AtomicBool::new(false);
+static ESCAPE_DOWN: AtomicBool = AtomicBool::new(false);
 static IS_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+// When cancelled/resolved while activation keys are still held, arm re-press requirement.
+// WinPie will NOT re-activate until keys are released and pressed again.
+static REQUIRE_KEY_RELEASE: AtomicBool = AtomicBool::new(false);
 
 pub struct InputManager {
     kbd_hook: HHOOK,
@@ -49,6 +54,14 @@ impl InputManager {
 
     pub fn set_active(&self, active: bool) {
         IS_ACTIVE.store(active, Ordering::SeqCst);
+        if !active {
+            // If Win or Escape is still held when returning to idle, require full release before next activation
+            let win_held = LEFT_WIN_DOWN.load(Ordering::SeqCst) || RIGHT_WIN_DOWN.load(Ordering::SeqCst);
+            let esc_held = ESCAPE_DOWN.load(Ordering::SeqCst);
+            if win_held || esc_held {
+                REQUIRE_KEY_RELEASE.store(true, Ordering::SeqCst);
+            }
+        }
     }
 }
 
@@ -108,20 +121,32 @@ unsafe extern "system" fn ll_keyboard_proc(
         let vk = VIRTUAL_KEY(kbd.vkCode as u16);
 
         let is_down = msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN;
+        let is_up = msg == WM_KEYUP || msg == WM_SYSKEYUP;
 
         // Accurately track Windows modifier keys
         if vk == VK_LWIN {
             LEFT_WIN_DOWN.store(is_down, Ordering::SeqCst);
         } else if vk == VK_RWIN {
             RIGHT_WIN_DOWN.store(is_down, Ordering::SeqCst);
+        } else if vk == VK_ESCAPE {
+            ESCAPE_DOWN.store(is_down, Ordering::SeqCst);
         }
 
         let win_held = LEFT_WIN_DOWN.load(Ordering::SeqCst) || RIGHT_WIN_DOWN.load(Ordering::SeqCst);
 
+        // Clear re-press requirement once both Win and Esc have been released
+        if is_up {
+            if !win_held && !ESCAPE_DOWN.load(Ordering::SeqCst) {
+                REQUIRE_KEY_RELEASE.store(false, Ordering::SeqCst);
+            }
+        }
+
         // Activation check: Win held + Escape DOWN
         if is_down && vk == VK_ESCAPE && win_held {
             let was_active = IS_ACTIVE.load(Ordering::SeqCst);
-            if !was_active {
+            let blocked = REQUIRE_KEY_RELEASE.load(Ordering::SeqCst);
+
+            if !was_active && !blocked {
                 // Mark active immediately so mouse hook consumes instantly without gap (INV-INPUT-006)
                 IS_ACTIVE.store(true, Ordering::SeqCst);
 
@@ -140,9 +165,12 @@ unsafe extern "system" fn ll_keyboard_proc(
                         LPARAM(((pt.y as isize) << 32) | (pt.x as u32 as isize)),
                     );
                 }
+                // Swallow qualifying trigger
+                return LRESULT(1);
+            } else if was_active || blocked {
+                // When already active or silently waiting for release, swallow Escape to avoid shell leakage
+                return LRESULT(1);
             }
-            // Section 8 & INV-INPUT-001: Swallow the qualifying Escape DOWN event!
-            return LRESULT(1);
         }
 
         // NEVER swallow Win key up or down events. Let the OS maintain its exact physical keyboard state.
@@ -195,6 +223,14 @@ unsafe extern "system" fn ll_mouse_proc(
                     // Section 12 & 21: Right click is unconditional cancellation, swallowed immediately.
                     // Immediately mark inactive
                     IS_ACTIVE.store(false, Ordering::SeqCst);
+
+                    // Require keys to be released before next activation
+                    let win_held = LEFT_WIN_DOWN.load(Ordering::SeqCst) || RIGHT_WIN_DOWN.load(Ordering::SeqCst);
+                    let esc_held = ESCAPE_DOWN.load(Ordering::SeqCst);
+                    if win_held || esc_held {
+                        REQUIRE_KEY_RELEASE.store(true, Ordering::SeqCst);
+                    }
+
                     let tid = MAIN_THREAD_ID.load(Ordering::SeqCst);
                     if tid != 0 {
                         let _ = PostThreadMessageW(
