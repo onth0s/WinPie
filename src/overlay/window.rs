@@ -178,119 +178,135 @@ impl OverlayWindow {
         let r = self.radius as f64;
         let dz = self.deadzone as f64;
 
-        // Precompute normal vectors for the 8 spoke dividing rays (at angles k * 45 - 22.5 + rot)
-        // Each ray line through origin has unit normal:
-        // Ray direction angle from North: phi_k = (k * 45 - 22.5 + rot) degrees
-        // dx_ray = sin(phi_k), dy_ray = -cos(phi_k)
-        // Ray unit normal (perp): nx = cos(phi_k), ny = sin(phi_k)
-        // Distance of point (dx, dy) from ray line is: |dx * nx + dy * ny|
+        // Precompute normal vectors for the 8 spoke dividing rays
         let mut spoke_normals = [(0.0f64, 0.0f64, 0.0f64, 0.0f64); 8];
         for k in 0..8 {
             let spoke_angle_deg = (k as f64) * 45.0 - 22.5 + self.rotation;
             let rad = spoke_angle_deg * PI / 180.0;
             let dx_ray = rad.sin();
             let dy_ray = -rad.cos();
-            // Normal is perpendicular: (cos(rad), sin(rad))
             let nx = rad.cos();
             let ny = rad.sin();
             spoke_normals[k] = (dx_ray, dy_ray, nx, ny);
         }
 
-        let spoke_half_width = 1.0; // Clean, uniform 2px line thickness with anti-aliasing
+        // 4x Supersampling offsets (rotated grid for superior anti-aliasing on curves)
+        const SAMPLES: [(f64, f64); 4] = [
+            (-0.3, -0.1),
+            (0.1, -0.3),
+            (0.3, 0.1),
+            (-0.1, 0.3),
+        ];
 
         for y in 0..self.size {
             for x in 0..self.size {
-                let dx = x as f64 - cx + 0.5;
-                let dy = y as f64 - cy + 0.5;
-                let dist = (dx * dx + dy * dy).sqrt();
+                let px = x as f64 - cx + 0.5;
+                let py = y as f64 - cy + 0.5;
 
-                // Anti-aliased outer rim boundary
-                if dist > r + 1.0 {
+                // Fast distance cull
+                let approx_dist = (px * px + py * py).sqrt();
+                if approx_dist > r + 2.0 {
                     continue;
                 }
 
-                let idx = (y * self.size + x) as usize;
+                let mut total_a = 0.0f64;
+                let mut total_r = 0.0f64;
+                let mut total_g = 0.0f64;
+                let mut total_b = 0.0f64;
 
-                if dist <= dz {
-                    // Inside deadzone: clean circle with smooth border
-                    if dist >= dz - 1.5 {
-                        let edge_factor = if dist >= dz - 0.5 {
-                            (dz + 0.5 - dist).clamp(0.0, 1.0)
-                        } else {
-                            1.0
-                        };
-                        let alpha = (220.0 * edge_factor) as u32;
-                        let val = (240 * alpha) / 255;
-                        pixels[idx] = (alpha << 24) | (val << 16) | (val << 8) | val;
-                    } else {
-                        // Deadzone interior: subtle dark translucent backdrop with center crosshair dot
-                        if dist <= 2.5 {
-                            // Center anchor dot
-                            let alpha = 230u32;
-                            let val = (255 * alpha) / 255;
-                            pixels[idx] = (alpha << 24) | (val << 16) | (val << 8) | val;
-                        } else {
-                            let alpha = 130u32;
-                            let val = (20 * alpha) / 255;
-                            pixels[idx] = (alpha << 24) | (val << 16) | (val << 8) | val;
-                        }
+                for &(ox, oy) in &SAMPLES {
+                    let sx = px + ox;
+                    let sy = py + oy;
+                    let dist = (sx * sx + sy * sy).sqrt();
+
+                    if dist > r {
+                        // Beyond circumference: completely empty
+                        continue;
                     }
-                } else {
-                    // In sector ring (dz < dist <= r)
-                    let angle = crate::geometry::angle_from_north_degrees(dx, dy);
-                    let sector = crate::geometry::classify_angle(angle, self.rotation);
-                    let is_hovered = hover == Some(sector);
 
-                    // Find minimum Euclidean distance to any of the 8 ray lines
-                    let mut min_spoke_dist = f64::MAX;
-                    for &(dx_ray, dy_ray, nx, ny) in &spoke_normals {
-                        // Dot product with ray direction to ensure point is in the forward ray direction
-                        let dot = dx * dx_ray + dy * dy_ray;
-                        if dot > 0.0 {
-                            let perp_dist = (dx * nx + dy * ny).abs();
-                            if perp_dist < min_spoke_dist {
-                                min_spoke_dist = perp_dist;
+                    if dist <= dz {
+                        // Inside deadzone
+                        if dist >= dz - 1.5 {
+                            // Deadzone border ring
+                            let a = 220.0;
+                            total_a += a;
+                            total_r += 240.0 * a / 255.0;
+                            total_g += 240.0 * a / 255.0;
+                            total_b += 240.0 * a / 255.0;
+                        } else if dist <= 2.5 {
+                            // Center anchor crosshair dot
+                            let a = 230.0;
+                            total_a += a;
+                            total_r += 255.0 * a / 255.0;
+                            total_g += 255.0 * a / 255.0;
+                            total_b += 255.0 * a / 255.0;
+                        } else {
+                            // Dark translucent deadzone core
+                            let a = 130.0;
+                            total_a += a;
+                            total_r += 20.0 * a / 255.0;
+                            total_g += 20.0 * a / 255.0;
+                            total_b += 20.0 * a / 255.0;
+                        }
+                    } else {
+                        // Sector ring
+                        let angle = crate::geometry::angle_from_north_degrees(sx, sy);
+                        let sector = crate::geometry::classify_angle(angle, self.rotation);
+                        let is_hovered = hover == Some(sector);
+
+                        // Spoke check
+                        let mut min_spoke_dist = f64::MAX;
+                        for &(dx_ray, dy_ray, nx, ny) in &spoke_normals {
+                            let dot = sx * dx_ray + sy * dy_ray;
+                            if dot > 0.0 {
+                                let perp_dist = (sx * nx + sy * ny).abs();
+                                if perp_dist < min_spoke_dist {
+                                    min_spoke_dist = perp_dist;
+                                }
                             }
                         }
+
+                        let is_spoke = min_spoke_dist <= 1.0;
+                        let is_rim = dist >= r - 2.0;
+
+                        if is_spoke {
+                            let a = 190.0;
+                            total_a += a;
+                            total_r += 235.0 * a / 255.0;
+                            total_g += 235.0 * a / 255.0;
+                            total_b += 235.0 * a / 255.0;
+                        } else if is_rim {
+                            let a = 220.0;
+                            total_a += a;
+                            total_r += 240.0 * a / 255.0;
+                            total_g += 240.0 * a / 255.0;
+                            total_b += 240.0 * a / 255.0;
+                        } else if is_hovered {
+                            // Cyan glow
+                            let a = 220.0;
+                            total_a += a;
+                            total_r += 0.0 * a / 255.0;
+                            total_g += 175.0 * a / 255.0;
+                            total_b += 255.0 * a / 255.0;
+                        } else {
+                            // Frosted glass
+                            let a = 150.0;
+                            total_a += a;
+                            total_r += 22.0 * a / 255.0;
+                            total_g += 24.0 * a / 255.0;
+                            total_b += 30.0 * a / 255.0;
+                        }
                     }
+                }
 
-                    // Outer border ring
-                    let is_outer_rim = dist >= r - 2.0;
+                if total_a > 0.0 {
+                    let avg_a = (total_a / 4.0).round() as u32;
+                    let avg_r = (total_r / 4.0).round() as u32;
+                    let avg_g = (total_g / 4.0).round() as u32;
+                    let avg_b = (total_b / 4.0).round() as u32;
 
-                    // Compute smooth alpha for outer circular boundary
-                    let outer_alpha_factor = if dist > r - 1.0 {
-                        (r + 1.0 - dist).clamp(0.0, 1.0)
-                    } else {
-                        1.0
-                    };
-
-                    if min_spoke_dist <= spoke_half_width + 0.8 {
-                        // Anti-aliased constant-width spoke separator
-                        let spoke_intensity = (1.0 - (min_spoke_dist - spoke_half_width).max(0.0) / 0.8).clamp(0.0, 1.0);
-                        let base_alpha = 190.0 * spoke_intensity * outer_alpha_factor;
-                        let alpha = base_alpha as u32;
-                        let val = (235 * alpha) / 255;
-                        pixels[idx] = (alpha << 24) | (val << 16) | (val << 8) | val;
-                    } else if is_outer_rim {
-                        // Smooth outer rim
-                        let alpha = (220.0 * outer_alpha_factor) as u32;
-                        let val = (240 * alpha) / 255;
-                        pixels[idx] = (alpha << 24) | (val << 16) | (val << 8) | val;
-                    } else if is_hovered {
-                        // Glowing cyan glass highlight for hovered sector
-                        let alpha = (220.0 * outer_alpha_factor) as u32;
-                        let r_col = (0u32 * alpha) / 255;
-                        let g_col = (175u32 * alpha) / 255;
-                        let b_col = (255u32 * alpha) / 255;
-                        pixels[idx] = (alpha << 24) | (r_col << 16) | (g_col << 8) | b_col;
-                    } else {
-                        // Clean frosted dark glass for unhovered sectors
-                        let alpha = (150.0 * outer_alpha_factor) as u32;
-                        let r_col = (22u32 * alpha) / 255;
-                        let g_col = (24u32 * alpha) / 255;
-                        let b_col = (30u32 * alpha) / 255;
-                        pixels[idx] = (alpha << 24) | (r_col << 16) | (g_col << 8) | b_col;
-                    }
+                    let idx = (y * self.size + x) as usize;
+                    pixels[idx] = (avg_a << 24) | (avg_r << 16) | (avg_g << 8) | avg_b;
                 }
             }
         }
