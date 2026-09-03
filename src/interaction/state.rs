@@ -15,8 +15,8 @@ pub enum InteractionEvent {
     MouseMove(Point),
     LButtonDown(Point),
     RButtonDown(Point),
+    WinUp(Point),
     FatalError,
-    // Note: Key releases (WinUp, EscUp) produce no state change
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -61,7 +61,7 @@ impl InteractionFsm {
         }
     }
 
-    /// Pure transition function following STATE_MACHINE.yaml
+    /// Pure transition function
     pub fn transition(&mut self, event: InteractionEvent) -> InteractionEffect {
         match (self.state, event) {
             (State::Idle, InteractionEvent::WinEscDown(anchor)) => {
@@ -101,13 +101,22 @@ impl InteractionFsm {
                         InteractionEffect::Committed(sector)
                     }
                     MouseResolution::NoOp => {
-                        // Remains active!
                         InteractionEffect::NoOpInDeadzone
                     }
                     MouseResolution::Cancel => {
                         self.state = State::Idle;
                         InteractionEffect::Cancelled
                     }
+                }
+            }
+
+            // On Win release: if cursor is in valid bounds (hover is Some(Sector)), commit it; otherwise cancel
+            (State::Active { anchor, .. }, InteractionEvent::WinUp(cursor)) => {
+                let resolution = evaluate_commit(anchor, cursor, &self.config);
+                self.state = State::Idle;
+                match resolution {
+                    MouseResolution::Commit(sector) => InteractionEffect::Committed(sector),
+                    _ => InteractionEffect::Cancelled,
                 }
             }
 

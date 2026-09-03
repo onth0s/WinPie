@@ -8,7 +8,7 @@ use crate::diagnostics::{AppConfig, Diagnostics};
 use crate::geometry::{GeometryConfig, Point};
 use crate::input::{
     InputManager, WM_WINPIE_ACTIVATE, WM_WINPIE_LBUTTONDOWN, WM_WINPIE_MOUSEMOVE,
-    WM_WINPIE_RBUTTONDOWN,
+    WM_WINPIE_RBUTTONDOWN, WM_WINPIE_WINUP,
 };
 use crate::interaction::{InteractionEffect, InteractionEvent, InteractionFsm};
 use crate::overlay::OverlayWindow;
@@ -57,9 +57,12 @@ impl Application {
     }
 
     pub fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        println!("WinPie POC running. Press Win+Esc to activate radial menu.");
-        println!("Left click to commit sector (or inside deadzone to no-op).");
-        println!("Right click to cancel. Press Ctrl+C in terminal to exit.");
+        println!("WinPie running.");
+        println!("- Press Win+Esc to open radial menu.");
+        println!("- Left-click sector to commit (click in deadzone or out-of-bounds to cancel).");
+        println!("- Releasing Win key commits hovered sector (or cancels if in deadzone/out-of-bounds).");
+        println!("- Right-click cancels anytime.");
+        println!("- Press Ctrl+C in terminal to exit.\n");
 
         unsafe {
             let mut msg = MSG::default();
@@ -76,6 +79,10 @@ impl Application {
                     WM_WINPIE_LBUTTONDOWN => {
                         let pt = parse_lparam_point(msg.lParam);
                         self.handle_lbuttondown(pt);
+                    }
+                    WM_WINPIE_WINUP => {
+                        let pt = parse_lparam_point(msg.lParam);
+                        self.handle_winup(pt);
                     }
                     WM_WINPIE_RBUTTONDOWN => {
                         self.handle_rbuttondown();
@@ -116,8 +123,24 @@ impl Application {
                 self.input_manager.set_active(false);
             }
             InteractionEffect::NoOpInDeadzone => {
-                // Stay active
                 self.input_manager.set_active(true);
+            }
+            InteractionEffect::Cancelled => {
+                self.diagnostics.log_cancel();
+                self.overlay.hide();
+                self.input_manager.set_active(false);
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_winup(&mut self, pt: Point) {
+        let effect = self.fsm.transition(InteractionEvent::WinUp(pt));
+        match effect {
+            InteractionEffect::Committed(sector) => {
+                self.diagnostics.log_commit(sector);
+                self.overlay.hide();
+                self.input_manager.set_active(false);
             }
             InteractionEffect::Cancelled => {
                 self.diagnostics.log_cancel();
@@ -130,7 +153,6 @@ impl Application {
 
     fn handle_rbuttondown(&mut self) {
         let _ = self.fsm.transition(InteractionEvent::RButtonDown(Point::default()));
-        // Unconditionally hide overlay and ensure inactive
         self.diagnostics.log_cancel();
         self.overlay.hide();
         self.input_manager.set_active(false);

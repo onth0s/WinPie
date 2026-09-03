@@ -69,6 +69,30 @@ fn test_commit_and_unified_cancel() {
 }
 
 #[test]
+fn test_win_release_commit_or_cancel() {
+    let mut fsm = InteractionFsm::new(GeometryConfig::default());
+    let anchor = Point::new(200, 200);
+    fsm.transition(InteractionEvent::WinEscDown(anchor));
+
+    // Release Win while cursor is in valid sector (e.g. East at 260, 200) -> Commit(E)
+    let eff = fsm.transition(InteractionEvent::WinUp(Point::new(260, 200)));
+    assert_eq!(eff, InteractionEffect::Committed(Sector::E));
+    assert_eq!(fsm.state, State::Idle);
+
+    // Release Win while cursor is in deadzone (e.g. at 205, 205) -> Cancel
+    fsm.transition(InteractionEvent::WinEscDown(anchor));
+    let eff = fsm.transition(InteractionEvent::WinUp(Point::new(205, 205)));
+    assert_eq!(eff, InteractionEffect::Cancelled);
+    assert_eq!(fsm.state, State::Idle);
+
+    // Release Win while cursor is out-of-bounds (e.g. at 1000, 1000) -> Cancel
+    fsm.transition(InteractionEvent::WinEscDown(anchor));
+    let eff = fsm.transition(InteractionEvent::WinUp(Point::new(1000, 1000)));
+    assert_eq!(eff, InteractionEffect::Cancelled);
+    assert_eq!(fsm.state, State::Idle);
+}
+
+#[test]
 fn test_at_009_right_click_cancels() {
     let mut fsm = InteractionFsm::new(GeometryConfig::default());
     let anchor = Point::new(200, 200);

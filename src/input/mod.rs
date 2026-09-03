@@ -8,6 +8,7 @@ pub const WM_WINPIE_ACTIVATE: u32 = WM_USER + 101;
 pub const WM_WINPIE_MOUSEMOVE: u32 = WM_USER + 102;
 pub const WM_WINPIE_LBUTTONDOWN: u32 = WM_USER + 103;
 pub const WM_WINPIE_RBUTTONDOWN: u32 = WM_USER + 104;
+pub const WM_WINPIE_WINUP: u32 = WM_USER + 105;
 
 static MAIN_THREAD_ID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
@@ -165,15 +166,34 @@ unsafe extern "system" fn ll_keyboard_proc(
                         LPARAM(((pt.y as isize) << 32) | (pt.x as u32 as isize)),
                     );
                 }
-                // Swallow qualifying trigger
                 return LRESULT(1);
             } else if was_active || blocked {
-                // When already active or silently waiting for release, swallow Escape to avoid shell leakage
                 return LRESULT(1);
             }
         }
 
-        // NEVER swallow Win key up or down events. Let the OS maintain its exact physical keyboard state.
+        // On Win key release while active: trigger commit or cancel check
+        // (Esc release is no-op, Win release commits if in valid bounds)
+        if is_up && (vk == VK_LWIN || vk == VK_RWIN) {
+            let was_active = IS_ACTIVE.load(Ordering::SeqCst);
+            if was_active && !win_held {
+                // Win key has been released! Mark inactive immediately
+                IS_ACTIVE.store(false, Ordering::SeqCst);
+
+                let mut pt = POINT::default();
+                let _ = GetCursorPos(&mut pt);
+
+                let tid = MAIN_THREAD_ID.load(Ordering::SeqCst);
+                if tid != 0 {
+                    let _ = PostThreadMessageW(
+                        tid,
+                        WM_WINPIE_WINUP,
+                        WPARAM(0),
+                        LPARAM(((pt.y as isize) << 32) | (pt.x as u32 as isize)),
+                    );
+                }
+            }
+        }
     }
 
     CallNextHookEx(None, n_code, wparam, lparam)
@@ -193,8 +213,6 @@ unsafe extern "system" fn ll_mouse_proc(
         if active {
             match msg {
                 WM_MOUSEMOVE => {
-                    // Section 11 & INV-INPUT-003: WinPie observes mouse movement globally,
-                    // but does NOT swallow WM_MOUSEMOVE (normal pointer movement continues).
                     let tid = MAIN_THREAD_ID.load(Ordering::SeqCst);
                     if tid != 0 {
                         let _ = PostThreadMessageW(
@@ -206,8 +224,6 @@ unsafe extern "system" fn ll_mouse_proc(
                     }
                 }
                 WM_LBUTTONDOWN => {
-                    // Section 12 & INV-INPUT-004:
-                    // Must be consumed BEFORE foreground application delivery. Return 1 immediately!
                     let tid = MAIN_THREAD_ID.load(Ordering::SeqCst);
                     if tid != 0 {
                         let _ = PostThreadMessageW(
@@ -220,11 +236,8 @@ unsafe extern "system" fn ll_mouse_proc(
                     return LRESULT(1);
                 }
                 WM_RBUTTONDOWN => {
-                    // Section 12 & 21: Right click is unconditional cancellation, swallowed immediately.
-                    // Immediately mark inactive
                     IS_ACTIVE.store(false, Ordering::SeqCst);
 
-                    // Require keys to be released before next activation
                     let win_held = LEFT_WIN_DOWN.load(Ordering::SeqCst) || RIGHT_WIN_DOWN.load(Ordering::SeqCst);
                     let esc_held = ESCAPE_DOWN.load(Ordering::SeqCst);
                     if win_held || esc_held {
@@ -243,7 +256,6 @@ unsafe extern "system" fn ll_mouse_proc(
                     return LRESULT(1);
                 }
                 WM_LBUTTONUP | WM_RBUTTONUP => {
-                    // Swallow button release for the click that resolved/cancelled WinPie
                     return LRESULT(1);
                 }
                 _ => {}
