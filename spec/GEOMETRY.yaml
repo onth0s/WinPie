@@ -1,0 +1,15 @@
+geometry:
+  sectors: 8
+  sector_angle_degrees: 45.0
+  rotation_degrees: 0.0
+  deadzone_default: 32.0
+  radius_default: 180.0
+  sectors_definition:
+    0: { name: "N",  range: [337.5, 22.5] }
+    1: { name: "NE", range: [22.5, 67.5] }
+    2: { name: "E",  range: [67.5, 112.5] }
+    3: { name: "SE", range: [112.5, 157.5] }
+    4: { name: "S",  range: [157.5, 202.5] }
+    5: { name: "SW", range: [202.5, 247.5] }
+    6: { name: "W",  range: [247.5, 292.5] }
+    7: { name: "NW", range: [292.5, 337.5] }

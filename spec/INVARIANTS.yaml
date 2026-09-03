@@ -1,0 +1,134 @@
+invariants:
+  - id: INV-INPUT-001
+    category: input
+    severity: critical
+    statement: >
+      Win+Esc activates the wheel exactly once per qualifying gesture.
+
+  - id: INV-INPUT-002
+    category: input
+    severity: critical
+    statement: >
+      While ACTIVE, left/right mouse-button transitions are not forwarded
+      to the foreground application.
+
+  - id: INV-INPUT-003
+    category: input
+    severity: critical
+    statement: >
+      Mouse movement remains observable by WinPie while normal pointer
+      movement continues through the operating system.
+
+  - id: INV-INPUT-004
+    category: input
+    severity: critical
+    statement: >
+      The resolving left-button-down event is swallowed before foreground
+      application delivery.
+
+  - id: INV-INPUT-005
+    category: input
+    severity: critical
+    statement: >
+      A resolving button event is never re-emitted after returning to IDLE.
+
+  - id: INV-INPUT-006
+    category: input
+    severity: critical
+    statement: >
+      No input-processing gap exists after ACTIVE begins in which a
+      resolving button event can escape.
+
+  - id: INV-STATE-001
+    category: state
+    severity: critical
+    statement: >
+      ACTIVE always terminates in IDLE through commit, cancel, or fatal error.
+
+  - id: INV-STATE-002
+    category: state
+    severity: critical
+    statement: >
+      Keyboard release events cannot independently terminate ACTIVE.
+
+  - id: INV-STATE-003
+    category: state
+    severity: critical
+    statement: >
+      Left-click inside the deadzone does not terminate ACTIVE.
+
+  - id: INV-STATE-004
+    category: state
+    severity: critical
+    statement: >
+      Hover selection is preselection only and cannot independently resolve
+      or terminate the interaction.
+
+  - id: INV-GEOMETRY-001
+    category: geometry
+    severity: critical
+    statement: >
+      The wheel contains exactly eight equal directional sectors.
+
+  - id: INV-GEOMETRY-002
+    category: geometry
+    severity: critical
+    statement: >
+      Sector classification is deterministic for every finite cursor position.
+
+  - id: INV-GEOMETRY-003
+    category: geometry
+    severity: critical
+    statement: >
+      Points inside the deadzone map to no directional hover sector.
+
+  - id: INV-GEOMETRY-004
+    category: geometry
+    severity: critical
+    statement: >
+      A left-click outside the deadzone resolves solely by angle regardless
+      of distance from the wheel center.
+
+  - id: INV-GEOMETRY-005
+    category: geometry
+    severity: critical
+    statement: >
+      Right-click cancellation is independent of geometry.
+
+  - id: INV-GEOMETRY-006
+    category: geometry
+    severity: critical
+    statement: >
+      Cursor coordinates and overlay coordinates use the same physical
+      screen-coordinate space.
+
+  - id: INV-GEOMETRY-007
+    category: geometry
+    severity: critical
+    statement: >
+      rotation_degrees changes the effective sector boundaries.
+
+  - id: INV-OVERLAY-001
+    category: overlay
+    severity: critical
+    statement: >
+      Showing the overlay does not activate or focus its window.
+
+  - id: INV-OVERLAY-002
+    category: overlay
+    severity: critical
+    statement: >
+      Pixels outside the rendered wheel remain visually transparent.
+
+  - id: INV-OVERLAY-003
+    category: overlay
+    severity: critical
+    statement: >
+      The overlay does not become the effective mouse target for pointer
+      movement.
+
+  - id: INV-RECOVERY-001
+    category: recovery
+    severity: critical
+    statement: >
+      Every supported ACTIVE input sequence eventually returns to IDLE.

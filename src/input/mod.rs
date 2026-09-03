@@ -1,0 +1,194 @@
+use std::sync::atomic::{AtomicBool, Ordering};
+use windows::Win32::Foundation::{HMODULE, LPARAM, LRESULT, POINT, WPARAM};
+use windows::Win32::UI::Input::KeyboardAndMouse::*;
+use windows::Win32::UI::WindowsAndMessaging::*;
+
+// Custom thread messages sent from hooks to the main message loop
+pub const WM_WINPIE_ACTIVATE: u32 = WM_USER + 101;
+pub const WM_WINPIE_MOUSEMOVE: u32 = WM_USER + 102;
+pub const WM_WINPIE_LBUTTONDOWN: u32 = WM_USER + 103;
+pub const WM_WINPIE_RBUTTONDOWN: u32 = WM_USER + 104;
+
+static MAIN_THREAD_ID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+// Minimal state tracked in the low-level hooks
+static LEFT_WIN_DOWN: AtomicBool = AtomicBool::new(false);
+static RIGHT_WIN_DOWN: AtomicBool = AtomicBool::new(false);
+static IS_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+// Guards against swallowing Start menu activation when Win is released after Win+Esc
+static SUPPRESS_NEXT_WIN_UP: AtomicBool = AtomicBool::new(false);
+
+pub struct InputManager {
+    kbd_hook: HHOOK,
+    mouse_hook: HHOOK,
+}
+
+impl InputManager {
+    pub fn install(thread_id: u32) -> Result<Self, windows::core::Error> {
+        MAIN_THREAD_ID.store(thread_id, Ordering::SeqCst);
+
+        unsafe {
+            let kbd_hook = SetWindowsHookExW(
+                WH_KEYBOARD_LL,
+                Some(ll_keyboard_proc),
+                HMODULE::default(),
+                0,
+            )?;
+
+            let mouse_hook = SetWindowsHookExW(
+                WH_MOUSE_LL,
+                Some(ll_mouse_proc),
+                HMODULE::default(),
+                0,
+            )?;
+
+            Ok(Self {
+                kbd_hook,
+                mouse_hook,
+            })
+        }
+    }
+
+    pub fn set_active(&self, active: bool) {
+        IS_ACTIVE.store(active, Ordering::SeqCst);
+    }
+}
+
+impl Drop for InputManager {
+    fn drop(&mut self) {
+        unsafe {
+            if !self.kbd_hook.0.is_null() {
+                let _ = UnhookWindowsHookEx(self.kbd_hook);
+            }
+            if !self.mouse_hook.0.is_null() {
+                let _ = UnhookWindowsHookEx(self.mouse_hook);
+            }
+        }
+    }
+}
+
+unsafe extern "system" fn ll_keyboard_proc(
+    n_code: i32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
+    if n_code >= 0 {
+        let kbd = *(lparam.0 as *const KBDLLHOOKSTRUCT);
+        let msg = wparam.0 as u32;
+        let vk = VIRTUAL_KEY(kbd.vkCode as u16);
+
+        let is_down = msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN;
+        let is_up = msg == WM_KEYUP || msg == WM_SYSKEYUP;
+
+        // Track Windows modifier keys
+        if vk == VK_LWIN {
+            LEFT_WIN_DOWN.store(is_down, Ordering::SeqCst);
+        } else if vk == VK_RWIN {
+            RIGHT_WIN_DOWN.store(is_down, Ordering::SeqCst);
+        }
+
+        let win_held = LEFT_WIN_DOWN.load(Ordering::SeqCst) || RIGHT_WIN_DOWN.load(Ordering::SeqCst);
+
+        // Activation check: Win held + Escape DOWN
+        if is_down && vk == VK_ESCAPE && win_held {
+            let was_active = IS_ACTIVE.load(Ordering::SeqCst);
+            if !was_active {
+                // Mark active immediately so mouse hook consumes instantly without gap (INV-INPUT-006)
+                IS_ACTIVE.store(true, Ordering::SeqCst);
+                SUPPRESS_NEXT_WIN_UP.store(true, Ordering::SeqCst);
+
+                let mut pt = POINT::default();
+                let _ = GetCursorPos(&mut pt);
+
+                let tid = MAIN_THREAD_ID.load(Ordering::SeqCst);
+                if tid != 0 {
+                    let _ = PostThreadMessageW(
+                        tid,
+                        WM_WINPIE_ACTIVATE,
+                        WPARAM(0),
+                        LPARAM(((pt.y as isize) << 32) | (pt.x as u32 as isize)),
+                    );
+                }
+            }
+            // Section 8 & INV-INPUT-001: Swallow the qualifying Escape DOWN event!
+            return LRESULT(1);
+        }
+
+        // To prevent Windows from popping up the Start Menu when releasing Win key after Win+Esc (Section 8)
+        if is_up && (vk == VK_LWIN || vk == VK_RWIN) {
+            if SUPPRESS_NEXT_WIN_UP.swap(false, Ordering::SeqCst) {
+                return LRESULT(1);
+            }
+        }
+    }
+
+    CallNextHookEx(None, n_code, wparam, lparam)
+}
+
+unsafe extern "system" fn ll_mouse_proc(
+    n_code: i32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
+    if n_code >= 0 {
+        let mouse = *(lparam.0 as *const MSLLHOOKSTRUCT);
+        let msg = wparam.0 as u32;
+
+        let active = IS_ACTIVE.load(Ordering::SeqCst);
+
+        if active {
+            match msg {
+                WM_MOUSEMOVE => {
+                    // Section 11 & INV-INPUT-003: WinPie observes mouse movement globally,
+                    // but does NOT swallow WM_MOUSEMOVE (normal pointer movement continues).
+                    let tid = MAIN_THREAD_ID.load(Ordering::SeqCst);
+                    if tid != 0 {
+                        let _ = PostThreadMessageW(
+                            tid,
+                            WM_WINPIE_MOUSEMOVE,
+                            WPARAM(0),
+                            LPARAM(((mouse.pt.y as isize) << 32) | (mouse.pt.x as u32 as isize)),
+                        );
+                    }
+                }
+                WM_LBUTTONDOWN => {
+                    // Section 12 & INV-INPUT-004:
+                    // Must be consumed BEFORE foreground application delivery. Return 1 immediately!
+                    let tid = MAIN_THREAD_ID.load(Ordering::SeqCst);
+                    if tid != 0 {
+                        let _ = PostThreadMessageW(
+                            tid,
+                            WM_WINPIE_LBUTTONDOWN,
+                            WPARAM(0),
+                            LPARAM(((mouse.pt.y as isize) << 32) | (mouse.pt.x as u32 as isize)),
+                        );
+                    }
+                    return LRESULT(1);
+                }
+                WM_RBUTTONDOWN => {
+                    // Section 12 & 21: Right click is unconditional cancellation, swallowed immediately.
+                    // Return to IDLE immediately
+                    IS_ACTIVE.store(false, Ordering::SeqCst);
+                    let tid = MAIN_THREAD_ID.load(Ordering::SeqCst);
+                    if tid != 0 {
+                        let _ = PostThreadMessageW(
+                            tid,
+                            WM_WINPIE_RBUTTONDOWN,
+                            WPARAM(0),
+                            LPARAM(((mouse.pt.y as isize) << 32) | (mouse.pt.x as u32 as isize)),
+                        );
+                    }
+                    return LRESULT(1);
+                }
+                WM_LBUTTONUP | WM_RBUTTONUP => {
+                    // Also swallow up transitions for buttons down-swallowed by WinPie to prevent orphan ups
+                    return LRESULT(1);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    CallNextHookEx(None, n_code, wparam, lparam)
+}

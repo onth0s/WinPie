@@ -1,0 +1,24 @@
+states:
+  - IDLE
+  - ACTIVE
+
+transitions:
+  - from: IDLE
+    event: WIN_ESC_DOWN
+    to: ACTIVE
+    effect: ACTIVATE
+
+  - from: ACTIVE
+    event: LBUTTON_DOWN
+    to: IDLE
+    effect: COMMIT_OR_NOOP
+
+  - from: ACTIVE
+    event: RBUTTON_DOWN
+    to: IDLE
+    effect: CANCEL
+
+  - from: ACTIVE
+    event: FATAL_ERROR
+    to: IDLE
+    effect: CANCEL

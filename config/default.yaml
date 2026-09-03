@@ -1,0 +1,40 @@
+activation:
+  modifier: win
+  trigger: escape
+
+  # Qualifying Escape DOWN is consumed.
+  swallow_trigger: true
+
+  # Which Windows modifier(s) qualify.
+  left_win: true
+  right_win: true
+
+overlay:
+  radius: 180
+  deadzone: 32
+
+  # Radius/deadzone are physical screen pixels.
+  coordinate_space: physical_screen_pixels
+
+  window:
+    popup: true
+    toolwindow: true
+    topmost: true
+    no_activate: true
+    layered: true
+    transparent_input: true
+
+wheel:
+  slices: 8
+  rotation_degrees: 0.0
+
+rendering:
+  show_stubs: true
+  show_deadzone: true
+  highlight_hovered: true
+
+diagnostics:
+  enabled: true
+  log_selection: true
+  log_cancel: true
+  log_fatal_errors: true
