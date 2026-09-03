@@ -22,7 +22,9 @@ Win + Esc
      │
      ├── cursor movement ──► hover sector
      │
-     ├── left click ───────► commit sector
+     ├── release Win ──────► commit (if in valid sector) or cancel (if out of bounds)
+     │
+     ├── left click ───────► commit (if in valid sector) or cancel (if out of bounds)
      │
      └── right click ──────► cancel
                               │
@@ -32,7 +34,7 @@ Win + Esc
                          └─────────┘
 ```
 
-The POC is successful when it can be invoked from an ordinary foreground Windows application, display a radial menu anchored to the current cursor position, track one of eight directions, commit with left-click, cancel with right-click, and restore the system to its prior interaction state without focus theft or leaked mouse-button input.
+The POC is successful when it can be invoked from an ordinary foreground Windows application, display a radial menu anchored to the current cursor position, track one of eight directions, commit via Win-key release or left-click within valid sector bounds, cancel on right-click or out-of-bounds click, and restore the system to its prior interaction state without focus theft, stuck modifiers, or leaked mouse-button input.
 
 ---
 
@@ -238,7 +240,12 @@ transitions:
   - from: ACTIVE
     event: LBUTTON_DOWN
     to: IDLE
-    effect: COMMIT_OR_NOOP
+    effect: COMMIT_IF_VALID_ELSE_CANCEL
+
+  - from: ACTIVE
+    event: WIN_UP
+    to: IDLE
+    effect: COMMIT_IF_VALID_ELSE_CANCEL
 
   - from: ACTIVE
     event: RBUTTON_DOWN
@@ -251,22 +258,13 @@ transitions:
     effect: CANCEL
 ```
 
-### Important semantic rule
+### Semantic resolution rules
 
-Keyboard release does **not** resolve the wheel.
-
-In particular:
-
-```text
-Win UP       → no effect while ACTIVE
-Esc UP       → no effect while ACTIVE
-```
-
-The wheel remains active until:
-
-1. left-button down;
-2. right-button down;
-3. fatal error.
+- **Esc UP** is a no-op while ACTIVE (releasing Esc does not dismiss the menu while Win remains held).
+- **Win UP** resolves the wheel: commits the hovered sector if within valid slice bounds ($\text{deadzone} < r \le \text{radius}$), or cancels if in deadzone/out-of-bounds.
+- **Left-Click** resolves the wheel: commits the hovered sector if within valid slice bounds, or cancels if in deadzone/out-of-bounds.
+- **Right-Click** unconditionally cancels anywhere.
+- **Re-press Requirement**: When cancelled or committed while activation keys remain held, WinPie silently waits until keys are released before allowing another activation.
 
 ---
 
@@ -737,37 +735,35 @@ Changing hover selection does **not** terminate ACTIVE.
 
 ---
 
-## Commit
+## Commit & Unified Cancel
 
-Left-click resolution is:
+Resolution occurs within the valid sector ring:
 
 ```text
 r <= deadzone
-    → NO-OP
-```
+    → CANCEL
 
-Otherwise:
+r > radius
+    → CANCEL
 
-```text
-r > deadzone
+deadzone < r <= radius
     → resolve by angle
     → Commit(sector)
 ```
-
-There is **no outer-radius restriction for click resolution**.
 
 Therefore:
 
 ```text
 hover:
-    deadzone → NONE
+    inside deadzone or outside radius → NONE
+    inside sector ring                → Some(sector)
 
-commit:
-    deadzone → NO-OP
-    outside deadzone → sector
+commit (Left-Click or Win-Up):
+    inside deadzone or outside radius → CANCEL
+    inside sector ring                → Commit(sector)
 ```
 
-The configured visual wheel radius is consequently a rendering boundary, not a click-validity boundary.
+Clicking or releasing outside valid slice bounds unifies with right-click cancellation.
 
 ---
 
@@ -938,13 +934,15 @@ invariants:
     category: state
     severity: critical
     statement: >
-      Keyboard release events cannot independently terminate ACTIVE.
+      Esc key release is a no-op while ACTIVE. Win key release commits the
+      hovered sector if cursor is within valid slice bounds, or cancels.
 
   - id: INV-STATE-003
     category: state
     severity: critical
     statement: >
-      Left-click inside the deadzone does not terminate ACTIVE.
+      Left-click inside the deadzone or outside the wheel radius cancels
+      and terminates ACTIVE (unified cancellation).
 
   - id: INV-STATE-004
     category: state
@@ -969,14 +967,14 @@ invariants:
     category: geometry
     severity: critical
     statement: >
-      Points inside the deadzone map to no directional hover sector.
+      Points inside the deadzone or outside the visual radius map to no directional hover sector.
 
   - id: INV-GEOMETRY-004
     category: geometry
     severity: critical
     statement: >
-      A left-click outside the deadzone resolves solely by angle regardless
-      of distance from the wheel center.
+      A left-click within the valid ring (deadzone < r <= radius) resolves by angle;
+      clicks outside this range cancel the interaction.
 
   - id: INV-GEOMETRY-005
     category: geometry
@@ -1461,14 +1459,15 @@ Specifically:
 * [x] Overlay does not steal focus.
 * [x] Overlay is visually transparent outside the wheel.
 * [x] Overlay does not become the effective pointer target.
-* [x] Eight sectors are rendered.
-* [x] Cursor movement updates hover state.
-* [x] Deadzone produces `NONE` hover.
-* [x] Left-click outside deadzone commits by angle.
-* [x] Left-click inside deadzone is a swallowed no-op.
+* [x] Eight sectors are rendered with anti-aliasing and constant spoke widths.
+* [x] Cursor movement updates hover state via precomputed 0ms bitmap cache.
+* [x] Deadzone and outer bounds produce `NONE` hover.
+* [x] Left-click or Win-up within slice bounds commits by angle.
+* [x] Left-click in deadzone or out of bounds cancels (unified cancel).
 * [x] Right-click cancels anywhere.
 * [x] Resolving button events cannot leak to the foreground application.
-* [x] Keyboard release does not resolve the wheel.
+* [x] Esc release is a no-op; Win release resolves the interaction.
+* [x] Keys held after cancel require re-press before next activation.
 * [x] Rotation changes sector boundaries.
 * [x] Multi-monitor physical coordinates behave correctly.
 * [x] Commit/cancel always tears down the interaction.

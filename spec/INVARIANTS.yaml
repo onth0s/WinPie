@@ -49,13 +49,15 @@ invariants:
     category: state
     severity: critical
     statement: >
-      Keyboard release events cannot independently terminate ACTIVE.
+      Esc key release is a no-op while ACTIVE. Win key release commits the
+      hovered sector if cursor is within valid slice bounds, or cancels.
 
   - id: INV-STATE-003
     category: state
     severity: critical
     statement: >
-      Left-click inside the deadzone does not terminate ACTIVE.
+      Left-click inside the deadzone or outside the wheel radius cancels
+      and terminates ACTIVE (unified cancellation).
 
   - id: INV-STATE-004
     category: state
@@ -80,14 +82,14 @@ invariants:
     category: geometry
     severity: critical
     statement: >
-      Points inside the deadzone map to no directional hover sector.
+      Points inside the deadzone or outside the visual radius map to no directional hover sector.
 
   - id: INV-GEOMETRY-004
     category: geometry
     severity: critical
     statement: >
-      A left-click outside the deadzone resolves solely by angle regardless
-      of distance from the wheel center.
+      A left-click within the valid ring (deadzone < r <= radius) resolves by angle;
+      clicks outside this range cancel the interaction.
 
   - id: INV-GEOMETRY-005
     category: geometry

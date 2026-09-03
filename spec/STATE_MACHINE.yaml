@@ -11,7 +11,12 @@ transitions:
   - from: ACTIVE
     event: LBUTTON_DOWN
     to: IDLE
-    effect: COMMIT_OR_NOOP
+    effect: COMMIT_IF_VALID_ELSE_CANCEL
+
+  - from: ACTIVE
+    event: WIN_UP
+    to: IDLE
+    effect: COMMIT_IF_VALID_ELSE_CANCEL
 
   - from: ACTIVE
     event: RBUTTON_DOWN
@@ -22,3 +27,4 @@ transitions:
     event: FATAL_ERROR
     to: IDLE
     effect: CANCEL
+
