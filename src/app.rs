@@ -1,4 +1,6 @@
-use windows::Win32::Foundation::LPARAM;
+use std::sync::atomic::{AtomicU32, Ordering};
+use windows::Win32::Foundation::{BOOL, LPARAM};
+use windows::Win32::System::Console::SetConsoleCtrlHandler;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::HiDpi::*;
@@ -12,6 +14,21 @@ use crate::input::{
 };
 use crate::interaction::{InteractionEffect, InteractionEvent, InteractionFsm};
 use crate::overlay::OverlayWindow;
+
+static APP_THREAD_ID: AtomicU32 = AtomicU32::new(0);
+
+unsafe extern "system" fn console_ctrl_handler(ctrl_type: u32) -> BOOL {
+    // 0 = CTRL_C_EVENT, 1 = CTRL_BREAK_EVENT, 2 = CTRL_CLOSE_EVENT
+    if ctrl_type == 0 || ctrl_type == 1 || ctrl_type == 2 {
+        let tid = APP_THREAD_ID.load(Ordering::SeqCst);
+        if tid != 0 {
+            let _ = PostThreadMessageW(tid, WM_QUIT, windows::Win32::Foundation::WPARAM(0), LPARAM(0));
+            // Return TRUE to indicate we handled the control signal and are exiting gracefully
+            return BOOL(1);
+        }
+    }
+    BOOL(0)
+}
 
 pub struct Application {
     #[allow(dead_code)]
@@ -45,6 +62,11 @@ impl Application {
         let overlay = OverlayWindow::new(&config, hinstance)?;
 
         let thread_id = unsafe { GetCurrentThreadId() };
+        APP_THREAD_ID.store(thread_id, Ordering::SeqCst);
+        unsafe {
+            let _ = SetConsoleCtrlHandler(Some(console_ctrl_handler), true);
+        }
+
         let input_manager = InputManager::install(thread_id)?;
 
         Ok(Self {
@@ -87,6 +109,9 @@ impl Application {
                     WM_WINPIE_RBUTTONDOWN => {
                         self.handle_rbuttondown();
                     }
+                    WM_QUIT => {
+                        break;
+                    }
                     _ => {
                         let _ = TranslateMessage(&msg);
                         DispatchMessageW(&msg);
@@ -95,6 +120,7 @@ impl Application {
             }
         }
 
+        println!("[WinPie] Clean shutdown complete.");
         Ok(())
     }
 
