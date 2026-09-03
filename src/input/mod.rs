@@ -11,13 +11,10 @@ pub const WM_WINPIE_RBUTTONDOWN: u32 = WM_USER + 104;
 
 static MAIN_THREAD_ID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
-// Minimal state tracked in the low-level hooks
+// Tracks low-level key state
 static LEFT_WIN_DOWN: AtomicBool = AtomicBool::new(false);
 static RIGHT_WIN_DOWN: AtomicBool = AtomicBool::new(false);
 static IS_ACTIVE: AtomicBool = AtomicBool::new(false);
-
-// Guards against swallowing Start menu activation when Win is released after Win+Esc
-static SUPPRESS_NEXT_WIN_UP: AtomicBool = AtomicBool::new(false);
 
 pub struct InputManager {
     kbd_hook: HHOOK,
@@ -68,6 +65,38 @@ impl Drop for InputManager {
     }
 }
 
+/// Injects a dummy key event (Ctrl down + up) to disarm Windows shell Start menu activation
+/// without leaving any modifier or key down in the system.
+unsafe fn disarm_windows_key() {
+    let inputs = [
+        INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk: VK_CONTROL,
+                    wScan: 0,
+                    dwFlags: KEYBD_EVENT_FLAGS(0),
+                    time: 0,
+                    dwExtraInfo: 0,
+                },
+            },
+        },
+        INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk: VK_CONTROL,
+                    wScan: 0,
+                    dwFlags: KEYEVENTF_KEYUP,
+                    time: 0,
+                    dwExtraInfo: 0,
+                },
+            },
+        },
+    ];
+    let _ = SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
+}
+
 unsafe extern "system" fn ll_keyboard_proc(
     n_code: i32,
     wparam: WPARAM,
@@ -79,9 +108,8 @@ unsafe extern "system" fn ll_keyboard_proc(
         let vk = VIRTUAL_KEY(kbd.vkCode as u16);
 
         let is_down = msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN;
-        let is_up = msg == WM_KEYUP || msg == WM_SYSKEYUP;
 
-        // Track Windows modifier keys
+        // Accurately track Windows modifier keys
         if vk == VK_LWIN {
             LEFT_WIN_DOWN.store(is_down, Ordering::SeqCst);
         } else if vk == VK_RWIN {
@@ -96,7 +124,9 @@ unsafe extern "system" fn ll_keyboard_proc(
             if !was_active {
                 // Mark active immediately so mouse hook consumes instantly without gap (INV-INPUT-006)
                 IS_ACTIVE.store(true, Ordering::SeqCst);
-                SUPPRESS_NEXT_WIN_UP.store(true, Ordering::SeqCst);
+
+                // Disarm Windows Start menu trigger cleanly by notifying the OS that another key accompanied Win
+                disarm_windows_key();
 
                 let mut pt = POINT::default();
                 let _ = GetCursorPos(&mut pt);
@@ -115,12 +145,7 @@ unsafe extern "system" fn ll_keyboard_proc(
             return LRESULT(1);
         }
 
-        // To prevent Windows from popping up the Start Menu when releasing Win key after Win+Esc (Section 8)
-        if is_up && (vk == VK_LWIN || vk == VK_RWIN) {
-            if SUPPRESS_NEXT_WIN_UP.swap(false, Ordering::SeqCst) {
-                return LRESULT(1);
-            }
-        }
+        // NEVER swallow Win key up or down events. Let the OS maintain its exact physical keyboard state.
     }
 
     CallNextHookEx(None, n_code, wparam, lparam)
@@ -168,7 +193,7 @@ unsafe extern "system" fn ll_mouse_proc(
                 }
                 WM_RBUTTONDOWN => {
                     // Section 12 & 21: Right click is unconditional cancellation, swallowed immediately.
-                    // Return to IDLE immediately
+                    // Immediately mark inactive
                     IS_ACTIVE.store(false, Ordering::SeqCst);
                     let tid = MAIN_THREAD_ID.load(Ordering::SeqCst);
                     if tid != 0 {
@@ -182,7 +207,7 @@ unsafe extern "system" fn ll_mouse_proc(
                     return LRESULT(1);
                 }
                 WM_LBUTTONUP | WM_RBUTTONUP => {
-                    // Also swallow up transitions for buttons down-swallowed by WinPie to prevent orphan ups
+                    // Swallow button release for the click that resolved/cancelled WinPie
                     return LRESULT(1);
                 }
                 _ => {}

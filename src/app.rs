@@ -129,12 +129,11 @@ impl Application {
     }
 
     fn handle_rbuttondown(&mut self) {
-        let effect = self.fsm.transition(InteractionEvent::RButtonDown(Point::default()));
-        if effect == InteractionEffect::Cancelled {
-            self.diagnostics.log_cancel();
-            self.overlay.hide();
-            self.input_manager.set_active(false);
-        }
+        let _ = self.fsm.transition(InteractionEvent::RButtonDown(Point::default()));
+        // Unconditionally hide overlay and ensure inactive
+        self.diagnostics.log_cancel();
+        self.overlay.hide();
+        self.input_manager.set_active(false);
     }
 }
 
