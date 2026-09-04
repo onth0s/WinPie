@@ -22,7 +22,10 @@ WinPie provides global, focus-preserving radial menu invocation anchored to the 
   - Transparent input hit-testing (`HTTRANSPARENT`) so foreground applications preserve native hover and focus.
   - 4x Rotated Grid Supersampling (RGSS) anti-aliasing for buttery-smooth circular rims and constant-width Euclidean spoke dividers.
   - Pre-rasterized bitmap cache on startup for **< 0.05ms** instant hover state blits without cursor lag.
-- **Multi-Monitor & DPI Aware**: Physical screen coordinate math across arbitrary multi-monitor topologies (including negative virtual screen bounds).
+- **Arbitrary Command Execution**: Launch any binary, script, document, or URL on sector commit (e.g. `sublime.exe`, `wt.exe`, `explorer.exe`). Spawned detached asynchronously with `CREATE_NO_WINDOW` to prevent terminal window flashing.
+- **Configurable Sector Labels**: Custom titles for every sector with ClearType anti-aliased text baked into 32-bit pre-multiplied alpha layered buffers at startup.
+- **Corner Toast Notification Overlay**: Displays a sleek frosted-glass toast in a configurable screen corner confirming committed actions with automatic dismissal timer (default 1s).
+- **Multi-Monitor & DPI Aware**: Physical screen coordinate math across arbitrary multi-monitor topologies (including negative virtual screen bounds), respecting taskbar margins.
 
 ---
 
@@ -185,10 +188,12 @@ winpie/
 │   │   └── mod.rs            # 8-way radial angle & Euclidean boundary math
 │   ├── overlay/
 │   │   ├── mod.rs
-│   │   └── window.rs         # Win32 Layered window & RGSS precomputed renderer
-│   └── diagnostics.rs        # Diagnostics logging
+│   │   ├── window.rs         # Win32 Layered radial menu & RGSS renderer
+│   │   └── toast.rs          # Layered toast overlay & auto-dismiss timer
+│   ├── executor.rs           # Detached asynchronous command spawner
+│   └── diagnostics.rs        # Diagnostics & configuration loader
 └── tests/
-    ├── geometry.rs           # Mathematical & coordinate test suite
+    ├── geometry.rs           # Geometry, label, toast & command test suite
     └── interaction.rs        # State machine transition verification
 ```
 
@@ -202,7 +207,7 @@ Run the full automated test suite:
 cargo test
 ```
 
-All 13 test suites verify geometry boundaries, rotation offsets, negative coordinate spaces, FSM transitions, and gesture cancellations.
+All 22 unit and integration tests verify geometry boundaries, rotation offsets, negative coordinate spaces, FSM transitions, gesture cancellations, label fallbacks, toast configuration, and command dispatching.
 
 ---
 

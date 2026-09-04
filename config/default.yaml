@@ -48,7 +48,7 @@ rendering:
   highlight_hovered: true
   show_labels: true
   font:
-    family: "Segoe UI"
+    family: "Monaco"
     size: 13
     weight: 600
     radius_ratio: 0.62
