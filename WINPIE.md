@@ -34,7 +34,7 @@ Win + Esc
                          └─────────┘
 ```
 
-The POC is successful when it can be invoked from an ordinary foreground Windows application, display a radial menu anchored to the current cursor position, track one of eight directions, commit via Win-key release or left-click within valid sector bounds, cancel on right-click or out-of-bounds click, and restore the system to its prior interaction state without focus theft, stuck modifiers, or leaked mouse-button input.
+The POC is successful when it can be invoked from an ordinary foreground Windows application, display a radial menu anchored to the current cursor position, track one of eight directions, commit via Win-key release or left-click within valid sector bounds, cancel on right-click or out-of-bounds click, launch configured system commands (e.g. `sublime.exe`), display a corner toast notification confirming commitment, and restore the system to its prior interaction state without focus theft, stuck modifiers, or leaked mouse-button input.
 
 ---
 
@@ -170,17 +170,46 @@ overlay:
 wheel:
   slices: 8
   rotation_degrees: 0.0
+  labels:
+    N: "Terminal"
+    NE: "Browser"
+    E: "Sublime"
+    SE: "Files"
+    S: "Settings"
+    SW: "Music"
+    W: "Tasks"
+    NW: "Chat"
+  commands:
+    E: "sublime.exe"
+    N: "wt.exe"
+    SE: "explorer.exe"
+    S: "control.exe"
 
 rendering:
   show_stubs: true
   show_deadzone: true
   highlight_hovered: true
+  show_labels: true
+  font:
+    family: "Segoe UI"
+    size: 13
+    weight: 600
+    radius_ratio: 0.62
 
 diagnostics:
   enabled: true
   log_selection: true
   log_cancel: true
   log_fatal_errors: true
+
+toast:
+  enabled: true
+  duration_ms: 1000
+  corner: bottom_right
+  margin_x: 24
+  margin_y: 24
+  font_size: 13
+  show_sector_direction: true
 ```
 
 ---
@@ -229,6 +258,7 @@ No conversion between logical pixels and physical pixels may occur between:
 states:
   - IDLE
   - ACTIVE
+  - WAIT_RELEASE
 
 transitions:
 
@@ -239,23 +269,28 @@ transitions:
 
   - from: ACTIVE
     event: LBUTTON_DOWN
-    to: IDLE
+    to: IDLE_OR_WAIT_RELEASE
     effect: COMMIT_IF_VALID_ELSE_CANCEL
 
   - from: ACTIVE
     event: WIN_UP
-    to: IDLE
+    to: IDLE_OR_WAIT_RELEASE
     effect: COMMIT_IF_VALID_ELSE_CANCEL
 
   - from: ACTIVE
     event: RBUTTON_DOWN
-    to: IDLE
+    to: IDLE_OR_WAIT_RELEASE
     effect: CANCEL
 
   - from: ACTIVE
     event: FATAL_ERROR
     to: IDLE
     effect: CANCEL
+
+  - from: WAIT_RELEASE
+    event: ALL_KEYS_UP
+    to: IDLE
+    effect: REARM
 ```
 
 ### Semantic resolution rules
@@ -920,11 +955,19 @@ invariants:
       No input-processing gap exists after ACTIVE begins in which a
       resolving button event can escape.
 
+  - id: INV-INPUT-007
+    category: input
+    severity: critical
+    statement: >
+      After resolution while any activation key remains physically held,
+      WinPie enters WAIT_RELEASE and remains disarmed until all activation keys
+      have been released.
+
   - id: INV-STATE-001
     category: state
     severity: critical
     statement: >
-      ACTIVE always terminates in IDLE through commit, cancel, or fatal error.
+      ACTIVE always terminates in IDLE (or WAIT_RELEASE) through commit, cancel, or fatal error.
 
   - id: INV-STATE-002
     category: state
@@ -1430,6 +1473,46 @@ reactivation while in WAIT_RELEASE is ignored
 all activation keys released -> state == IDLE (re-armed)
 ```
 
+### AT-020 — Configurable Sector Labels
+
+Configure custom labels in `config/default.yaml` (e.g. `E: "Sublime"`).
+
+Expected:
+
+```text
+labels appear rendered with ClearType anti-aliased font
+unconfigured sectors fall back to direction name (e.g. "N", "NE")
+hovered sector illuminates with bright white contrast
+```
+
+### AT-021 — Corner Toast Overlay
+
+Commit any sector while `toast.enabled: true`.
+
+Expected:
+
+```text
+toast overlay appears at configured corner (e.g. bottom_right)
+displays committed operation and sector name
+auto-dismisses after configured duration (default: 1000ms)
+does not steal window focus or intercept input
+consecutive commits reset dismiss countdown smoothly
+```
+
+### AT-022 — Arbitrary Command Execution
+
+Configure `wheel.commands` in `config/default.yaml` (e.g. `E: "sublime.exe"`).
+Commit sector `E`.
+
+Expected:
+
+```text
+configured process spawns detached asynchronously
+no flashing terminal window appears (CREATE_NO_WINDOW)
+WinPie remains responsive without blocking message pump
+```
+
+
 
 ---
 
@@ -1495,12 +1578,15 @@ Specifically:
 * [x] Overlay is visually transparent outside the wheel.
 * [x] Overlay does not become the effective pointer target.
 * [x] Eight sectors are rendered with anti-aliasing and constant spoke widths.
+* [x] Sector labels are rendered with ClearType anti-aliased font and customizable via YAML.
 * [x] Hover updates utilize pre-rasterized bitmap cache (no on-the-fly rasterization).
 * [x] Deadzone and outer bounds produce `NONE` hover.
 * [x] Left-click or Win-up within slice bounds commits by angle.
 * [x] Left-click in deadzone or out of bounds cancels (unified cancel).
 * [x] Right-click cancels anywhere.
 * [x] Resolving button events cannot leak to the foreground application.
+* [x] Corner toast notification displays committed action with auto-dismissal.
+* [x] Configured arbitrary commands execute detached asynchronously with `CREATE_NO_WINDOW`.
 * [x] Esc release is a no-op; Win release resolves the interaction.
 * [x] Keys held after cancel enter WAIT_RELEASE until physically released.
 * [x] Rotation changes sector boundaries.
@@ -1508,7 +1594,7 @@ Specifically:
 * [x] Commit/cancel always tears down the interaction.
 * [x] Fatal errors return to `IDLE`.
 * [x] No supported interaction sequence leaves the wheel permanently active.
-* [x] Geometry tests pass.
+* [x] Geometry, label, toast, and command tests pass.
 * [x] Interaction tests pass (including AT-005a/b, AT-007, AT-008, and AT-019).
 
 
