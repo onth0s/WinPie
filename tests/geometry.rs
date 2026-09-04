@@ -151,3 +151,31 @@ fn test_toast_default_config() {
     assert_eq!(config.toast.margin_y, 24);
 }
 
+#[test]
+fn test_command_config_and_lookup() {
+    let yaml_str = r#"
+wheel:
+  commands:
+    E: "sublime.exe"
+    N: "wt.exe"
+"#;
+    let config: winpie::diagnostics::AppConfig = serde_yaml::from_str(yaml_str).unwrap();
+
+    assert_eq!(config.get_command_for_sector(Sector::E), Some("sublime.exe"));
+    assert_eq!(config.get_command_for_sector(Sector::N), Some("wt.exe"));
+    assert_eq!(config.get_command_for_sector(Sector::S), None);
+    assert_eq!(config.get_command_for_sector(Sector::W), None);
+}
+
+#[test]
+fn test_execute_command_smoke() {
+    // Empty command is a safe no-op
+    assert!(winpie::executor::execute_command("").is_ok());
+    assert!(winpie::executor::execute_command("   ").is_ok());
+
+    // Valid command spawns without error
+    let res = winpie::executor::execute_command("cmd.exe /c exit 0");
+    assert!(res.is_ok());
+}
+
+

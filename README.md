@@ -120,12 +120,18 @@ wheel:
   labels:
     N: "Terminal"
     NE: "Browser"
-    E: "Editor"
+    E: "Sublime"
     SE: "Files"
     S: "Settings"
     SW: "Music"
     W: "Tasks"
     NW: "Chat"
+  # Arbitrary executable binaries, commands, or scripts
+  commands:
+    E: "sublime.exe"
+    N: "wt.exe"
+    SE: "explorer.exe"
+    S: "control.exe"
 
 rendering:
   show_stubs: true

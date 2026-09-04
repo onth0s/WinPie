@@ -4,3 +4,4 @@ pub mod overlay;
 pub mod input;
 pub mod diagnostics;
 pub mod app;
+pub mod executor;

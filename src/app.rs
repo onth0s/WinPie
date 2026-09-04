@@ -12,6 +12,7 @@ use crate::input::{
     InputManager, WM_WINPIE_ACTIVATE, WM_WINPIE_ALLKEYSUP, WM_WINPIE_LBUTTONDOWN,
     WM_WINPIE_MOUSEMOVE, WM_WINPIE_RBUTTONDOWN, WM_WINPIE_WINUP,
 };
+use crate::executor::execute_command;
 use crate::interaction::{InteractionEffect, InteractionEvent, InteractionFsm};
 use crate::overlay::{OverlayWindow, ToastOverlay};
 
@@ -159,6 +160,13 @@ impl Application {
                     format!("Committed: {}", label)
                 };
                 self.toast.show(anchor, &text, &self.config.toast);
+
+                if let Some(cmd) = self.config.get_command_for_sector(sector) {
+                    match execute_command(cmd) {
+                        Ok(_) => println!("[WinPie:ACTION] Executed: {}", cmd),
+                        Err(e) => eprintln!("[WinPie:ACTION ERROR] Failed to execute '{}': {}", cmd, e),
+                    }
+                }
             }
             InteractionEffect::Cancelled => {
                 self.diagnostics.log_cancel();
@@ -186,6 +194,13 @@ impl Application {
                     format!("Committed: {}", label)
                 };
                 self.toast.show(anchor, &text, &self.config.toast);
+
+                if let Some(cmd) = self.config.get_command_for_sector(sector) {
+                    match execute_command(cmd) {
+                        Ok(_) => println!("[WinPie:ACTION] Executed: {}", cmd),
+                        Err(e) => eprintln!("[WinPie:ACTION ERROR] Failed to execute '{}': {}", cmd, e),
+                    }
+                }
             }
             InteractionEffect::Cancelled => {
                 self.diagnostics.log_cancel();

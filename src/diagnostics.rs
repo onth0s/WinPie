@@ -75,6 +75,8 @@ pub struct WheelConfig {
     pub rotation_degrees: f64,
     #[serde(default)]
     pub labels: HashMap<String, String>,
+    #[serde(default)]
+    pub commands: HashMap<String, String>,
 }
 
 impl Default for WheelConfig {
@@ -83,6 +85,7 @@ impl Default for WheelConfig {
             slices: 8,
             rotation_degrees: 0.0,
             labels: HashMap::new(),
+            commands: HashMap::new(),
         }
     }
 }
@@ -247,6 +250,10 @@ impl AppConfig {
         } else {
             sector.name()
         }
+    }
+
+    pub fn get_command_for_sector(&self, sector: Sector) -> Option<&str> {
+        self.wheel.commands.get(sector.name()).map(|s| s.as_str())
     }
 }
 
