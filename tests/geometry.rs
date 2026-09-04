@@ -118,3 +118,36 @@ wheel:
     assert_eq!(config.get_label_for_sector(Sector::SE), "SE");
 }
 
+#[test]
+fn test_toast_config_deserialization() {
+    let yaml_str = r#"
+toast:
+  enabled: true
+  duration_ms: 1500
+  corner: top_left
+  margin_x: 32
+  margin_y: 40
+  font_size: 14
+  show_sector_direction: false
+"#;
+    let config: winpie::diagnostics::AppConfig = serde_yaml::from_str(yaml_str).unwrap();
+
+    assert!(config.toast.enabled);
+    assert_eq!(config.toast.duration_ms, 1500);
+    assert_eq!(config.toast.corner, winpie::diagnostics::ToastCorner::TopLeft);
+    assert_eq!(config.toast.margin_x, 32);
+    assert_eq!(config.toast.margin_y, 40);
+    assert_eq!(config.toast.font_size, 14);
+    assert!(!config.toast.show_sector_direction);
+}
+
+#[test]
+fn test_toast_default_config() {
+    let config = winpie::diagnostics::AppConfig::default();
+    assert!(config.toast.enabled);
+    assert_eq!(config.toast.duration_ms, 1000);
+    assert_eq!(config.toast.corner, winpie::diagnostics::ToastCorner::BottomRight);
+    assert_eq!(config.toast.margin_x, 24);
+    assert_eq!(config.toast.margin_y, 24);
+}
+

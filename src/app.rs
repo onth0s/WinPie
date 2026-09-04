@@ -13,7 +13,7 @@ use crate::input::{
     WM_WINPIE_MOUSEMOVE, WM_WINPIE_RBUTTONDOWN, WM_WINPIE_WINUP,
 };
 use crate::interaction::{InteractionEffect, InteractionEvent, InteractionFsm};
-use crate::overlay::OverlayWindow;
+use crate::overlay::{OverlayWindow, ToastOverlay};
 
 static APP_THREAD_ID: AtomicU32 = AtomicU32::new(0);
 
@@ -29,11 +29,11 @@ unsafe extern "system" fn console_ctrl_handler(ctrl_type: u32) -> BOOL {
 }
 
 pub struct Application {
-    #[allow(dead_code)]
     config: AppConfig,
     diagnostics: Diagnostics,
     fsm: InteractionFsm,
     overlay: OverlayWindow,
+    toast: ToastOverlay,
     input_manager: InputManager,
 }
 
@@ -57,6 +57,7 @@ impl Application {
 
         let hinstance = unsafe { GetModuleHandleW(None)?.into() };
         let overlay = OverlayWindow::new(&config, hinstance)?;
+        let toast = ToastOverlay::new(hinstance)?;
 
         let thread_id = unsafe { GetCurrentThreadId() };
         APP_THREAD_ID.store(thread_id, Ordering::SeqCst);
@@ -71,6 +72,7 @@ impl Application {
             diagnostics,
             fsm,
             overlay,
+            toast,
             input_manager,
         })
     }
@@ -141,6 +143,7 @@ impl Application {
     }
 
     fn handle_lbuttondown(&mut self, pt: Point) {
+        let anchor = self.fsm.active_anchor().unwrap_or(pt);
         let keys_held = InputManager::are_keys_held();
         let effect = self.fsm.transition(InteractionEvent::LButtonDown(pt, keys_held));
         match effect {
@@ -148,6 +151,14 @@ impl Application {
                 self.diagnostics.log_commit(sector);
                 self.overlay.hide();
                 self.input_manager.set_active(false);
+
+                let label = self.config.get_label_for_sector(sector);
+                let text = if self.config.toast.show_sector_direction {
+                    format!("Committed: {} ({})", label, sector.name())
+                } else {
+                    format!("Committed: {}", label)
+                };
+                self.toast.show(anchor, &text, &self.config.toast);
             }
             InteractionEffect::Cancelled => {
                 self.diagnostics.log_cancel();
@@ -159,6 +170,7 @@ impl Application {
     }
 
     fn handle_winup(&mut self, pt: Point) {
+        let anchor = self.fsm.active_anchor().unwrap_or(pt);
         let keys_held = InputManager::are_keys_held();
         let effect = self.fsm.transition(InteractionEvent::WinUp(pt, keys_held));
         match effect {
@@ -166,6 +178,14 @@ impl Application {
                 self.diagnostics.log_commit(sector);
                 self.overlay.hide();
                 self.input_manager.set_active(false);
+
+                let label = self.config.get_label_for_sector(sector);
+                let text = if self.config.toast.show_sector_direction {
+                    format!("Committed: {} ({})", label, sector.name())
+                } else {
+                    format!("Committed: {}", label)
+                };
+                self.toast.show(anchor, &text, &self.config.toast);
             }
             InteractionEffect::Cancelled => {
                 self.diagnostics.log_cancel();

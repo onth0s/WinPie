@@ -14,6 +14,8 @@ pub struct AppConfig {
     pub rendering: RenderingConfig,
     #[serde(default)]
     pub diagnostics: DiagnosticsConfig,
+    #[serde(default)]
+    pub toast: ToastConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -162,6 +164,52 @@ impl Default for DiagnosticsConfig {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToastCorner {
+    BottomRight,
+    BottomLeft,
+    TopRight,
+    TopLeft,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ToastConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default = "default_toast_duration")]
+    pub duration_ms: u32,
+    #[serde(default = "default_toast_corner")]
+    pub corner: ToastCorner,
+    #[serde(default = "default_toast_margin")]
+    pub margin_x: i32,
+    #[serde(default = "default_toast_margin")]
+    pub margin_y: i32,
+    #[serde(default = "default_toast_font_size")]
+    pub font_size: i32,
+    #[serde(default = "default_true")]
+    pub show_sector_direction: bool,
+}
+
+impl Default for ToastConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            duration_ms: 1000,
+            corner: ToastCorner::BottomRight,
+            margin_x: 24,
+            margin_y: 24,
+            font_size: 13,
+            show_sector_direction: true,
+        }
+    }
+}
+
+fn default_toast_duration() -> u32 { 1000 }
+fn default_toast_corner() -> ToastCorner { ToastCorner::BottomRight }
+fn default_toast_margin() -> i32 { 24 }
+fn default_toast_font_size() -> i32 { 13 }
+
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
@@ -170,6 +218,7 @@ impl Default for AppConfig {
             wheel: WheelConfig::default(),
             rendering: RenderingConfig::default(),
             diagnostics: DiagnosticsConfig::default(),
+            toast: ToastConfig::default(),
         }
     }
 }

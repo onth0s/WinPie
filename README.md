@@ -143,6 +143,15 @@ diagnostics:
   log_selection: true
   log_cancel: true
   log_fatal_errors: true
+
+toast:
+  enabled: true
+  duration_ms: 1000          # Overlay lifespan in milliseconds (default: 1000ms / 1s)
+  corner: bottom_right       # Options: bottom_right, bottom_left, top_right, top_left
+  margin_x: 24               # Margin from screen edge in physical pixels
+  margin_y: 24               # Margin from screen edge in physical pixels
+  font_size: 13              # Toast text size
+  show_sector_direction: true # e.g. "Terminal (N)" vs "Terminal"
 ```
 
 ---
