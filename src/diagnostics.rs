@@ -62,12 +62,17 @@ impl Default for OverlayConfig {
     }
 }
 
+use std::collections::HashMap;
+use crate::geometry::Sector;
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct WheelConfig {
     #[serde(default = "default_slices")]
     pub slices: usize,
     #[serde(default = "default_rotation")]
     pub rotation_degrees: f64,
+    #[serde(default)]
+    pub labels: HashMap<String, String>,
 }
 
 impl Default for WheelConfig {
@@ -75,9 +80,38 @@ impl Default for WheelConfig {
         Self {
             slices: 8,
             rotation_degrees: 0.0,
+            labels: HashMap::new(),
         }
     }
 }
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct FontConfig {
+    #[serde(default = "default_font_family")]
+    pub family: String,
+    #[serde(default = "default_font_size")]
+    pub size: i32,
+    #[serde(default = "default_font_weight")]
+    pub weight: i32,
+    #[serde(default = "default_radius_ratio")]
+    pub radius_ratio: f64,
+}
+
+impl Default for FontConfig {
+    fn default() -> Self {
+        Self {
+            family: "Segoe UI".to_string(),
+            size: 13,
+            weight: 600,
+            radius_ratio: 0.62,
+        }
+    }
+}
+
+fn default_font_family() -> String { "Segoe UI".to_string() }
+fn default_font_size() -> i32 { 13 }
+fn default_font_weight() -> i32 { 600 }
+fn default_radius_ratio() -> f64 { 0.62 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct RenderingConfig {
@@ -87,6 +121,10 @@ pub struct RenderingConfig {
     pub show_deadzone: bool,
     #[serde(default = "default_true")]
     pub highlight_hovered: bool,
+    #[serde(default = "default_true")]
+    pub show_labels: bool,
+    #[serde(default)]
+    pub font: FontConfig,
 }
 
 impl Default for RenderingConfig {
@@ -95,6 +133,8 @@ impl Default for RenderingConfig {
             show_stubs: true,
             show_deadzone: true,
             highlight_hovered: true,
+            show_labels: true,
+            font: FontConfig::default(),
         }
     }
 }
@@ -149,6 +189,14 @@ impl AppConfig {
             serde_yaml::from_str(&content).unwrap_or_default()
         } else {
             Self::default()
+        }
+    }
+
+    pub fn get_label_for_sector(&self, sector: Sector) -> &str {
+        if let Some(lbl) = self.wheel.labels.get(sector.name()) {
+            lbl.as_str()
+        } else {
+            sector.name()
         }
     }
 }

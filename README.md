@@ -116,11 +116,27 @@ overlay:
 wheel:
   slices: 8
   rotation_degrees: 0.0 # 0.0 centers North on [337.5°, 22.5°)
+  # Custom sector titles (fall back to direction name if omitted)
+  labels:
+    N: "Terminal"
+    NE: "Browser"
+    E: "Editor"
+    SE: "Files"
+    S: "Settings"
+    SW: "Music"
+    W: "Tasks"
+    NW: "Chat"
 
 rendering:
   show_stubs: true
   show_deadzone: true
   highlight_hovered: true
+  show_labels: true            # Toggle label rendering
+  font:
+    family: "Segoe UI"         # Windows font family
+    size: 13                   # Font point size / pixel height
+    weight: 600                # Font weight (400 normal, 600 semibold, 700 bold)
+    radius_ratio: 0.62         # Distance ratio from deadzone to outer radius
 
 diagnostics:
   enabled: true

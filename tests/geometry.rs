@@ -94,3 +94,27 @@ fn test_unified_cancel_bounds() {
     // Left-click in valid sector ring (radius 100, between 32 and 180) -> Commit(E)
     assert_eq!(evaluate_commit(center, Point::new(100, 0), &config), Resolution::Commit(Sector::E));
 }
+
+#[test]
+fn test_sector_label_config_and_fallback() {
+    let yaml_str = r#"
+wheel:
+  labels:
+    N: "Terminal"
+    E: "Editor"
+"#;
+    let config: winpie::diagnostics::AppConfig = serde_yaml::from_str(yaml_str).unwrap();
+
+    // Configured labels
+    assert_eq!(config.get_label_for_sector(Sector::N), "Terminal");
+    assert_eq!(config.get_label_for_sector(Sector::E), "Editor");
+
+    // Unconfigured labels fall back to sector names
+    assert_eq!(config.get_label_for_sector(Sector::NE), "NE");
+    assert_eq!(config.get_label_for_sector(Sector::S), "S");
+    assert_eq!(config.get_label_for_sector(Sector::SW), "SW");
+    assert_eq!(config.get_label_for_sector(Sector::W), "W");
+    assert_eq!(config.get_label_for_sector(Sector::NW), "NW");
+    assert_eq!(config.get_label_for_sector(Sector::SE), "SE");
+}
+

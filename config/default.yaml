@@ -27,11 +27,26 @@ overlay:
 wheel:
   slices: 8
   rotation_degrees: 0.0
+  labels:
+    N: "Terminal"
+    NE: "Browser"
+    E: "Editor"
+    SE: "Files"
+    S: "Settings"
+    SW: "Music"
+    W: "Tasks"
+    NW: "Chat"
 
 rendering:
   show_stubs: true
   show_deadzone: true
   highlight_hovered: true
+  show_labels: true
+  font:
+    family: "Segoe UI"
+    size: 13
+    weight: 600
+    radius_ratio: 0.62
 
 diagnostics:
   enabled: true
