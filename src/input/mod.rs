@@ -1,7 +1,14 @@
-use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
-use windows::Win32::Foundation::{HMODULE, LPARAM, LRESULT, POINT, WPARAM};
-use windows::Win32::UI::Input::KeyboardAndMouse::*;
+pub mod keyboard;
+pub mod mouse;
+pub mod state;
+
+use std::sync::atomic::Ordering;
+use windows::Win32::Foundation::HMODULE;
 use windows::Win32::UI::WindowsAndMessaging::*;
+
+use self::keyboard::ll_keyboard_proc;
+use self::mouse::ll_mouse_proc;
+pub use self::state::{are_keys_held, MAIN_THREAD_ID};
 
 // Custom thread messages sent from hooks to the main message loop
 pub const WM_WINPIE_ACTIVATE: u32 = WM_USER + 101;
@@ -10,21 +17,6 @@ pub const WM_WINPIE_LBUTTONDOWN: u32 = WM_USER + 103;
 pub const WM_WINPIE_RBUTTONDOWN: u32 = WM_USER + 104;
 pub const WM_WINPIE_WINUP: u32 = WM_USER + 105;
 pub const WM_WINPIE_ALLKEYSUP: u32 = WM_USER + 106;
-
-static MAIN_THREAD_ID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-
-// Tracks low-level key state
-static LEFT_WIN_DOWN: AtomicBool = AtomicBool::new(false);
-static RIGHT_WIN_DOWN: AtomicBool = AtomicBool::new(false);
-static ESCAPE_DOWN: AtomicBool = AtomicBool::new(false);
-static IS_ACTIVE: AtomicBool = AtomicBool::new(false);
-
-// Deduplicate mouse movement in the hook to avoid flooding the message queue
-static LAST_POSTED_X: AtomicI32 = AtomicI32::new(i32::MIN);
-static LAST_POSTED_Y: AtomicI32 = AtomicI32::new(i32::MIN);
-
-// WAIT_RELEASE state: WinPie will NOT re-activate until keys are released and pressed again.
-static REQUIRE_KEY_RELEASE: AtomicBool = AtomicBool::new(false);
 
 pub struct InputManager {
     kbd_hook: HHOOK,
@@ -58,18 +50,11 @@ impl InputManager {
     }
 
     pub fn are_keys_held() -> bool {
-        let win_held = LEFT_WIN_DOWN.load(Ordering::SeqCst) || RIGHT_WIN_DOWN.load(Ordering::SeqCst);
-        let esc_held = ESCAPE_DOWN.load(Ordering::SeqCst);
-        win_held || esc_held
+        state::are_keys_held()
     }
 
     pub fn set_active(&self, active: bool) {
-        IS_ACTIVE.store(active, Ordering::SeqCst);
-        if !active {
-            if Self::are_keys_held() {
-                REQUIRE_KEY_RELEASE.store(true, Ordering::SeqCst);
-            }
-        }
+        state::set_active(active);
     }
 }
 
@@ -84,211 +69,4 @@ impl Drop for InputManager {
             }
         }
     }
-}
-
-/// Injects a dummy key event (Ctrl down + up) to disarm Windows shell Start menu activation
-/// without leaving any modifier or key down in the system.
-unsafe fn disarm_windows_key() {
-    let inputs = [
-        INPUT {
-            r#type: INPUT_KEYBOARD,
-            Anonymous: INPUT_0 {
-                ki: KEYBDINPUT {
-                    wVk: VK_CONTROL,
-                    wScan: 0,
-                    dwFlags: KEYBD_EVENT_FLAGS(0),
-                    time: 0,
-                    dwExtraInfo: 0,
-                },
-            },
-        },
-        INPUT {
-            r#type: INPUT_KEYBOARD,
-            Anonymous: INPUT_0 {
-                ki: KEYBDINPUT {
-                    wVk: VK_CONTROL,
-                    wScan: 0,
-                    dwFlags: KEYEVENTF_KEYUP,
-                    time: 0,
-                    dwExtraInfo: 0,
-                },
-            },
-        },
-    ];
-    let _ = SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
-}
-
-unsafe extern "system" fn ll_keyboard_proc(
-    n_code: i32,
-    wparam: WPARAM,
-    lparam: LPARAM,
-) -> LRESULT {
-    if n_code >= 0 {
-        let kbd = *(lparam.0 as *const KBDLLHOOKSTRUCT);
-        let msg = wparam.0 as u32;
-        let vk = VIRTUAL_KEY(kbd.vkCode as u16);
-
-        let is_down = msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN;
-        let is_up = msg == WM_KEYUP || msg == WM_SYSKEYUP;
-
-        // Accurately track Windows modifier keys
-        if vk == VK_LWIN {
-            LEFT_WIN_DOWN.store(is_down, Ordering::SeqCst);
-        } else if vk == VK_RWIN {
-            RIGHT_WIN_DOWN.store(is_down, Ordering::SeqCst);
-        } else if vk == VK_ESCAPE {
-            ESCAPE_DOWN.store(is_down, Ordering::SeqCst);
-        }
-
-        let win_held = LEFT_WIN_DOWN.load(Ordering::SeqCst) || RIGHT_WIN_DOWN.load(Ordering::SeqCst);
-
-        // Clear WAIT_RELEASE once both Win and Esc have been physically released
-        if is_up {
-            if !win_held && !ESCAPE_DOWN.load(Ordering::SeqCst) {
-                if REQUIRE_KEY_RELEASE.swap(false, Ordering::SeqCst) {
-                    let tid = MAIN_THREAD_ID.load(Ordering::SeqCst);
-                    if tid != 0 {
-                        let _ = PostThreadMessageW(
-                            tid,
-                            WM_WINPIE_ALLKEYSUP,
-                            WPARAM(0),
-                            LPARAM(0),
-                        );
-                    }
-                }
-            }
-        }
-
-        // Activation check: Win held + Escape DOWN
-        if is_down && vk == VK_ESCAPE && win_held {
-            let was_active = IS_ACTIVE.load(Ordering::SeqCst);
-            let blocked = REQUIRE_KEY_RELEASE.load(Ordering::SeqCst);
-
-            if !was_active && !blocked {
-                // Reset mouse deduplication
-                LAST_POSTED_X.store(i32::MIN, Ordering::SeqCst);
-                LAST_POSTED_Y.store(i32::MIN, Ordering::SeqCst);
-
-                IS_ACTIVE.store(true, Ordering::SeqCst);
-
-                // Disarm Windows Start menu trigger cleanly
-                disarm_windows_key();
-
-                let mut pt = POINT::default();
-                let _ = GetCursorPos(&mut pt);
-
-                let tid = MAIN_THREAD_ID.load(Ordering::SeqCst);
-                if tid != 0 {
-                    let _ = PostThreadMessageW(
-                        tid,
-                        WM_WINPIE_ACTIVATE,
-                        WPARAM(0),
-                        LPARAM(((pt.y as isize) << 32) | (pt.x as u32 as isize)),
-                    );
-                }
-                return LRESULT(1);
-            } else if was_active || blocked {
-                return LRESULT(1);
-            }
-        }
-
-        // On Win key release while active: trigger commit or cancel check
-        if is_up && (vk == VK_LWIN || vk == VK_RWIN) {
-            let was_active = IS_ACTIVE.load(Ordering::SeqCst);
-            if was_active && !win_held {
-                IS_ACTIVE.store(false, Ordering::SeqCst);
-
-                let mut pt = POINT::default();
-                let _ = GetCursorPos(&mut pt);
-
-                let tid = MAIN_THREAD_ID.load(Ordering::SeqCst);
-                if tid != 0 {
-                    let _ = PostThreadMessageW(
-                        tid,
-                        WM_WINPIE_WINUP,
-                        WPARAM(0),
-                        LPARAM(((pt.y as isize) << 32) | (pt.x as u32 as isize)),
-                    );
-                }
-            }
-        }
-    }
-
-    CallNextHookEx(None, n_code, wparam, lparam)
-}
-
-unsafe extern "system" fn ll_mouse_proc(
-    n_code: i32,
-    wparam: WPARAM,
-    lparam: LPARAM,
-) -> LRESULT {
-    if n_code >= 0 {
-        let mouse = *(lparam.0 as *const MSLLHOOKSTRUCT);
-        let msg = wparam.0 as u32;
-
-        let active = IS_ACTIVE.load(Ordering::SeqCst);
-
-        if active {
-            match msg {
-                WM_MOUSEMOVE => {
-                    let cur_x = mouse.pt.x;
-                    let cur_y = mouse.pt.y;
-                    let prev_x = LAST_POSTED_X.load(Ordering::Relaxed);
-                    let prev_y = LAST_POSTED_Y.load(Ordering::Relaxed);
-
-                    // Deduplicate identical points to keep hook returning in <1µs
-                    if cur_x != prev_x || cur_y != prev_y {
-                        LAST_POSTED_X.store(cur_x, Ordering::Relaxed);
-                        LAST_POSTED_Y.store(cur_y, Ordering::Relaxed);
-
-                        let tid = MAIN_THREAD_ID.load(Ordering::SeqCst);
-                        if tid != 0 {
-                            let _ = PostThreadMessageW(
-                                tid,
-                                WM_WINPIE_MOUSEMOVE,
-                                WPARAM(0),
-                                LPARAM(((cur_y as isize) << 32) | (cur_x as u32 as isize)),
-                            );
-                        }
-                    }
-                }
-                WM_LBUTTONDOWN => {
-                    let tid = MAIN_THREAD_ID.load(Ordering::SeqCst);
-                    if tid != 0 {
-                        let _ = PostThreadMessageW(
-                            tid,
-                            WM_WINPIE_LBUTTONDOWN,
-                            WPARAM(0),
-                            LPARAM(((mouse.pt.y as isize) << 32) | (mouse.pt.x as u32 as isize)),
-                        );
-                    }
-                    return LRESULT(1);
-                }
-                WM_RBUTTONDOWN => {
-                    IS_ACTIVE.store(false, Ordering::SeqCst);
-
-                    if InputManager::are_keys_held() {
-                        REQUIRE_KEY_RELEASE.store(true, Ordering::SeqCst);
-                    }
-
-                    let tid = MAIN_THREAD_ID.load(Ordering::SeqCst);
-                    if tid != 0 {
-                        let _ = PostThreadMessageW(
-                            tid,
-                            WM_WINPIE_RBUTTONDOWN,
-                            WPARAM(0),
-                            LPARAM(((mouse.pt.y as isize) << 32) | (mouse.pt.x as u32 as isize)),
-                        );
-                    }
-                    return LRESULT(1);
-                }
-                WM_LBUTTONUP | WM_RBUTTONUP => {
-                    return LRESULT(1);
-                }
-                _ => {}
-            }
-        }
-    }
-
-    CallNextHookEx(None, n_code, wparam, lparam)
 }

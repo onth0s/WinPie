@@ -1,3 +1,4 @@
+pub mod config;
 pub mod geometry;
 pub mod interaction;
 pub mod overlay;

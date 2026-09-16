@@ -10,7 +10,7 @@ use windows::Win32::Graphics::Gdi::{
 };
 use windows::Win32::UI::WindowsAndMessaging::*;
 
-use crate::diagnostics::{ToastConfig, ToastCorner};
+use crate::config::{ToastConfig, ToastCorner};
 use crate::geometry::Point;
 
 const TOAST_TIMER_ID: usize = 9001;

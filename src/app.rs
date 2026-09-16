@@ -6,7 +6,8 @@ use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::HiDpi::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
-use crate::diagnostics::{AppConfig, Diagnostics};
+use crate::config::AppConfig;
+use crate::diagnostics::Diagnostics;
 use crate::geometry::{GeometryConfig, Point};
 use crate::input::{
     InputManager, WM_WINPIE_ACTIVATE, WM_WINPIE_ALLKEYSUP, WM_WINPIE_LBUTTONDOWN,
@@ -91,19 +92,19 @@ impl Application {
             while GetMessageW(&mut msg, None, 0, 0).as_bool() {
                 match msg.message {
                     WM_WINPIE_ACTIVATE => {
-                        let pt = parse_lparam_point(msg.lParam);
+                        let pt = Point::from_lparam(msg.lParam.0);
                         self.handle_activate(pt);
                     }
                     WM_WINPIE_MOUSEMOVE => {
-                        let pt = parse_lparam_point(msg.lParam);
+                        let pt = Point::from_lparam(msg.lParam.0);
                         self.handle_mousemove(pt);
                     }
                     WM_WINPIE_LBUTTONDOWN => {
-                        let pt = parse_lparam_point(msg.lParam);
+                        let pt = Point::from_lparam(msg.lParam.0);
                         self.handle_lbuttondown(pt);
                     }
                     WM_WINPIE_WINUP => {
-                        let pt = parse_lparam_point(msg.lParam);
+                        let pt = Point::from_lparam(msg.lParam.0);
                         self.handle_winup(pt);
                     }
                     WM_WINPIE_RBUTTONDOWN => {
@@ -224,9 +225,3 @@ impl Application {
     }
 }
 
-fn parse_lparam_point(lparam: LPARAM) -> Point {
-    let raw = lparam.0 as usize;
-    let x = (raw & 0xFFFFFFFF) as u32 as i32;
-    let y = ((raw >> 32) & 0xFFFFFFFF) as u32 as i32;
-    Point::new(x, y)
-}
