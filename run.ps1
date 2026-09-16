@@ -1,6 +1,12 @@
 <#
 .SYNOPSIS
     Convenience script to run WinPie (debug or release).
+.DESCRIPTION
+    Launches the WinPie radial interaction system.
+.PARAMETER Release
+    Runs the release build instead of debug.
+.PARAMETER BuildOnly
+    Delegates to .\build.ps1 to compile without launching.
 .EXAMPLE
     .\run.ps1
     .\run.ps1 -Release
@@ -12,20 +18,21 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-
 Set-Location $PSScriptRoot
 
 if ($BuildOnly) {
     if ($Release) {
-        cargo build --release
+        & "$PSScriptRoot\build.ps1" -Release
     } else {
-        cargo build
+        & "$PSScriptRoot\build.ps1"
     }
     exit $LASTEXITCODE
 }
 
-Write-Host "Starting WinPie..." -ForegroundColor Cyan
-Write-Host "Press Win+Esc to open radial menu. Left-click to select. Right-click to cancel." -ForegroundColor DarkGray
+$mode = if ($Release) { "Release" } else { "Debug" }
+
+Write-Host "Starting WinPie ($mode)..." -ForegroundColor Cyan
+Write-Host "Press Win+Esc to open radial menu. Left-click/Win-up to commit. Right-click to cancel." -ForegroundColor DarkGray
 Write-Host "Press Ctrl+C in this terminal to exit.`n" -ForegroundColor DarkGray
 
 if ($Release) {
