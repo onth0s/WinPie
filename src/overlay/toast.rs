@@ -10,7 +10,7 @@ use windows::Win32::Graphics::Gdi::{
 };
 use windows::Win32::UI::WindowsAndMessaging::*;
 
-use crate::config::{ToastConfig, ToastCorner};
+use crate::config::{parse_hex_color, HintToastConfig, ThemeConfig, ToastConfig, ToastCorner};
 use crate::geometry::Point;
 
 const TOAST_TIMER_ID: usize = 9001;
@@ -63,8 +63,75 @@ impl ToastOverlay {
         }
     }
 
-    pub fn show(&self, anchor: Point, text: &str, config: &ToastConfig) {
+    pub fn hwnd(&self) -> HWND {
+        self.hwnd
+    }
+
+    pub fn show(&self, anchor: Point, text: &str, config: &ToastConfig, theme: &ThemeConfig) {
         if !config.enabled || text.is_empty() {
+            return;
+        }
+        self.show_custom(
+            anchor,
+            text,
+            config.corner,
+            config.margin_x,
+            config.margin_y,
+            config.font_size,
+            config.corner_radius.max(theme.toast_corner_radius),
+            Some(config.duration_ms),
+            theme,
+        );
+    }
+
+    pub fn show_tooltip(&self, anchor: Point, text: &str, config: &ToastConfig, theme: &ThemeConfig) {
+        if !config.enabled || !config.show_hover_tooltips || text.is_empty() {
+            return;
+        }
+        self.show_custom(
+            anchor,
+            text,
+            config.corner,
+            config.margin_x,
+            config.margin_y,
+            config.font_size,
+            config.corner_radius.max(theme.toast_corner_radius),
+            None,
+            theme,
+        );
+    }
+
+    pub fn show_hint(&self, anchor: Point, config: &HintToastConfig, theme: &ThemeConfig) {
+        if !config.enabled || config.text.is_empty() {
+            return;
+        }
+        self.show_custom(
+            anchor,
+            &config.text,
+            config.corner,
+            config.margin_x,
+            config.margin_y,
+            config.font_size,
+            config.corner_radius.max(theme.toast_corner_radius),
+            None,
+            theme,
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn show_custom(
+        &self,
+        anchor: Point,
+        text: &str,
+        corner: ToastCorner,
+        margin_x: i32,
+        margin_y: i32,
+        font_size: i32,
+        corner_radius: f64,
+        auto_dismiss_ms: Option<u32>,
+        theme: &ThemeConfig,
+    ) {
+        if text.is_empty() {
             return;
         }
 
@@ -83,7 +150,7 @@ impl ToastOverlay {
             let screen_dc = GetDC(None);
             let measure_dc = CreateCompatibleDC(screen_dc);
 
-            let font_height = -config.font_size.abs();
+            let font_height = -font_size.abs();
             let family_wide: Vec<u16> = OsStr::new("Segoe UI")
                 .encode_wide()
                 .chain(std::iter::once(0))
@@ -120,32 +187,32 @@ impl ToastOverlay {
             let text_w = calc_rect.right - calc_rect.left;
             let text_h = calc_rect.bottom - calc_rect.top;
 
-            // Padding inside toast pill: horizontal 18px on each side + 12px for accent dot, vertical 10px
-            let pad_x = 18;
-            let pad_y = 10;
-            let dot_radius = 4;
-            let dot_margin_right = 10;
+            // Padding inside toast pill: horizontal 16px on each side + 10px for accent dot, vertical 8px
+            let pad_x = 16;
+            let pad_y = 8;
+            let dot_radius = 3;
+            let dot_margin_right = 8;
 
             let toast_w = text_w + pad_x * 2 + (dot_radius * 2) + dot_margin_right;
-            let toast_h = (text_h + pad_y * 2).max(36);
+            let toast_h = (text_h + pad_y * 2).max(32);
 
             // Compute corner coordinates inside work_area
-            let (x, y) = match config.corner {
+            let (x, y) = match corner {
                 ToastCorner::BottomRight => (
-                    work_area.right - toast_w - config.margin_x,
-                    work_area.bottom - toast_h - config.margin_y,
+                    work_area.right - toast_w - margin_x,
+                    work_area.bottom - toast_h - margin_y,
                 ),
                 ToastCorner::BottomLeft => (
-                    work_area.left + config.margin_x,
-                    work_area.bottom - toast_h - config.margin_y,
+                    work_area.left + margin_x,
+                    work_area.bottom - toast_h - margin_y,
                 ),
                 ToastCorner::TopRight => (
-                    work_area.right - toast_w - config.margin_x,
-                    work_area.top + config.margin_y,
+                    work_area.right - toast_w - margin_x,
+                    work_area.top + margin_y,
                 ),
                 ToastCorner::TopLeft => (
-                    work_area.left + config.margin_x,
-                    work_area.top + config.margin_y,
+                    work_area.left + margin_x,
+                    work_area.top + margin_y,
                 ),
             };
 
@@ -170,46 +237,47 @@ impl ToastOverlay {
 
             if let Ok(bmp) = bitmap {
                 let bmp_old = SelectObject(measure_dc, bmp);
-
                 let pixels = std::slice::from_raw_parts_mut(bits_ptr as *mut u32, (toast_w * toast_h) as usize);
 
-                // 1. Draw rounded card background with border in software
-                let corner_r = 10.0;
-                let bg_a = 230.0; // ~90% opacity frosted glass
-                let bg_r = 20.0;
-                let bg_g = 22.0;
-                let bg_b = 28.0;
+                // 1. Draw rounded card background with border using theme colors
+                let corner_r = corner_radius.max(0.0);
+                let bg_a = (theme.main_bg_opacity.clamp(0.0, 1.0) * 255.0).round();
+                let (bg_r, bg_g, bg_b) = parse_hex_color(&theme.main_bg_color);
 
-                let border_r = 50.0;
-                let border_g = 60.0;
-                let border_b = 80.0;
+                let border_a = (theme.border_opacity.clamp(0.0, 1.0) * 255.0).round();
+                let (border_r, border_g, border_b) = parse_hex_color(&theme.border_color);
 
                 for py in 0..toast_h {
                     for px in 0..toast_w {
                         let fx = px as f64 + 0.5;
                         let fy = py as f64 + 0.5;
 
-                        // Signed distance to rounded rectangle
-                        let dx = (fx - (toast_w as f64 / 2.0)).abs() - ((toast_w as f64 / 2.0) - corner_r);
-                        let dy = (fy - (toast_h as f64 / 2.0)).abs() - ((toast_h as f64 / 2.0) - corner_r);
+                        let dist = if corner_r > 0.0 {
+                            let dx = (fx - (toast_w as f64 / 2.0)).abs() - ((toast_w as f64 / 2.0) - corner_r);
+                            let dy = (fy - (toast_h as f64 / 2.0)).abs() - ((toast_h as f64 / 2.0) - corner_r);
 
-                        let dist = if dx > 0.0 && dy > 0.0 {
-                            (dx * dx + dy * dy).sqrt() - corner_r
+                            if dx > 0.0 && dy > 0.0 {
+                                (dx * dx + dy * dy).sqrt() - corner_r
+                            } else {
+                                dx.max(dy) - corner_r
+                            }
                         } else {
-                            dx.max(dy) - corner_r
+                            let dx = (fx - (toast_w as f64 / 2.0)).abs() - (toast_w as f64 / 2.0);
+                            let dy = (fy - (toast_h as f64 / 2.0)).abs() - (toast_h as f64 / 2.0);
+                            dx.max(dy)
                         };
 
                         let alpha_cov = (0.5 - dist).clamp(0.0, 1.0);
 
                         if alpha_cov > 0.0 {
                             let is_border = dist >= -1.0;
-                            let (c_r, c_g, c_b) = if is_border {
-                                (border_r, border_g, border_b)
+                            let (c_r, c_g, c_b, c_a) = if is_border {
+                                (border_r, border_g, border_b, border_a)
                             } else {
-                                (bg_r, bg_g, bg_b)
+                                (bg_r, bg_g, bg_b, bg_a)
                             };
 
-                            let final_a = (bg_a * alpha_cov).round() as u32;
+                            let final_a = (c_a * alpha_cov).round() as u32;
                             let final_r = (c_r * (final_a as f64 / 255.0)).round() as u32;
                             let final_g = (c_g * (final_a as f64 / 255.0)).round() as u32;
                             let final_b = (c_b * (final_a as f64 / 255.0)).round() as u32;
@@ -223,7 +291,9 @@ impl ToastOverlay {
                     }
                 }
 
-                // 2. Draw accent blue dot indicator
+                // 2. Draw accent dot indicator
+                let (accent_r, accent_g, accent_b) = parse_hex_color(&theme.accent_color);
+                let accent_opacity = theme.accent_opacity.clamp(0.0, 1.0);
                 let dot_cx = (pad_x + dot_radius) as f64;
                 let dot_cy = (toast_h as f64) / 2.0;
 
@@ -236,12 +306,11 @@ impl ToastOverlay {
 
                         if cov > 0.0 {
                             let idx = (py * toast_w + px) as usize;
-                            let dot_a = cov * 255.0;
-                            // Accent cyan/blue: #00AFFF
+                            let dot_a = cov * 255.0 * accent_opacity;
                             let src_a = dot_a / 255.0;
-                            let src_r = 0.0 * src_a;
-                            let src_g = 175.0 * src_a;
-                            let src_b = 255.0 * src_a;
+                            let src_r = accent_r * src_a;
+                            let src_g = accent_g * src_a;
+                            let src_b = accent_b * src_a;
 
                             let dst = pixels[idx];
                             let dst_a = ((dst >> 24) & 0xFF) as f64;
@@ -254,10 +323,10 @@ impl ToastOverlay {
                             let out_g = src_g + dst_g * (1.0 - src_a);
                             let out_b = src_b + dst_b * (1.0 - src_a);
 
-                            pixels[idx] = ((out_a.round() as u32) << 24)
-                                | ((out_r.round() as u32) << 16)
-                                | ((out_g.round() as u32) << 8)
-                                | (out_b.round() as u32);
+                            pixels[idx] = ((out_a.round() as u32).min(255) << 24)
+                                | ((out_r.round() as u32).min(255) << 16)
+                                | ((out_g.round() as u32).min(255) << 8)
+                                | ((out_b.round() as u32).min(255));
                         }
                     }
                 }
@@ -302,6 +371,7 @@ impl ToastOverlay {
                     );
 
                     let mask_pixels = std::slice::from_raw_parts(mask_bits as *const u32, (toast_w * toast_h) as usize);
+                    let (txt_r, txt_g, txt_b) = parse_hex_color(&theme.text_primary);
 
                     for py in 0..toast_h {
                         for px in text_left..(text_left + text_w + 4).min(toast_w) {
@@ -314,9 +384,9 @@ impl ToastOverlay {
 
                             if lum > 0 {
                                 let src_a = (lum as f64) / 255.0;
-                                let src_r = 255.0 * src_a;
-                                let src_g = 255.0 * src_a;
-                                let src_b = 255.0 * src_a;
+                                let src_r = txt_r * src_a;
+                                let src_g = txt_g * src_a;
+                                let src_b = txt_b * src_a;
 
                                 let dst = pixels[idx];
                                 let dst_a = ((dst >> 24) & 0xFF) as f64;
@@ -378,8 +448,12 @@ impl ToastOverlay {
                     SWP_NOACTIVATE | SWP_SHOWWINDOW,
                 );
 
-                // Set / reset auto-dismiss timer
-                let _ = SetTimer(self.hwnd, TOAST_TIMER_ID, config.duration_ms, None);
+                // Set / reset auto-dismiss timer or kill timer for persistent tooltips
+                if let Some(duration) = auto_dismiss_ms {
+                    let _ = SetTimer(self.hwnd, TOAST_TIMER_ID, duration, None);
+                } else {
+                    let _ = KillTimer(self.hwnd, TOAST_TIMER_ID);
+                }
 
                 SelectObject(measure_dc, bmp_old);
                 let _ = DeleteObject(bmp);

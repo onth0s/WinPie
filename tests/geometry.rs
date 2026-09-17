@@ -146,9 +146,96 @@ fn test_toast_default_config() {
     let config = winpie::config::AppConfig::default();
     assert!(config.toast.enabled);
     assert_eq!(config.toast.duration_ms, 1000);
-    assert_eq!(config.toast.corner, winpie::config::ToastCorner::BottomRight);
+    assert_eq!(config.toast.corner, winpie::config::ToastCorner::TopRight);
     assert_eq!(config.toast.margin_x, 24);
     assert_eq!(config.toast.margin_y, 24);
+    assert_eq!(config.toast.corner_radius, 4.0);
+
+    // Startup toast defaults
+    assert!(config.startup_toast.enabled);
+    assert_eq!(config.startup_toast.duration_ms, 5000);
+    assert_eq!(config.startup_toast.corner, winpie::config::ToastCorner::TopRight);
+    assert_eq!(config.startup_toast.font_size, 13);
+    assert_eq!(config.startup_toast.corner_radius, 4.0);
+    assert_eq!(config.startup_toast.text, "WinPie is active (Press Win+Esc)");
+
+    // Hint toast defaults
+    assert!(config.hint_toast.enabled);
+    assert_eq!(config.hint_toast.corner, winpie::config::ToastCorner::BottomRight);
+    assert_eq!(config.hint_toast.font_size, 11);
+    assert_eq!(config.hint_toast.corner_radius, 4.0);
+}
+
+#[test]
+fn test_startup_toast_config_deserialization() {
+    let yaml_str = r#"
+startup_toast:
+  enabled: true
+  duration_ms: 7500
+  corner: bottom_left
+  margin_x: 30
+  margin_y: 30
+  font_size: 15
+  text: "Welcome to WinPie"
+"#;
+    let config: winpie::config::AppConfig = serde_yaml::from_str(yaml_str).unwrap();
+    assert!(config.startup_toast.enabled);
+    assert_eq!(config.startup_toast.duration_ms, 7500);
+    assert_eq!(config.startup_toast.corner, winpie::config::ToastCorner::BottomLeft);
+    assert_eq!(config.startup_toast.margin_x, 30);
+    assert_eq!(config.startup_toast.margin_y, 30);
+    assert_eq!(config.startup_toast.font_size, 15);
+    assert_eq!(config.startup_toast.text, "Welcome to WinPie");
+}
+
+#[test]
+fn test_theme_config_deserialization() {
+    let yaml_str = r##"
+theme:
+  menu_corner_radius: 6.0
+  toast_corner_radius: 6.0
+  accent_color: "#FF5500"
+  accent_opacity: 0.9
+  main_bg_color: "#101010"
+  main_bg_opacity: 0.95
+  border_color: "#445566"
+  border_opacity: 0.8
+  text_primary: "#EEEEEE"
+  text_secondary: "#888888"
+  text_accent: "#FF5500"
+  wheel:
+    spoke_color: "#CCCCCC"
+    spoke_opacity: 0.7
+    rim_color: "#FFFFFF"
+    rim_opacity: 0.85
+    hover_glow_color: "#FF5500"
+    hover_glow_opacity: 0.85
+    sector_bg_color: "#181818"
+    sector_bg_opacity: 0.6
+    deadzone_bg_color: "#111111"
+    deadzone_bg_opacity: 0.5
+    deadzone_border_color: "#FFFFFF"
+    deadzone_border_opacity: 0.85
+"##;
+    let config: winpie::config::AppConfig = serde_yaml::from_str(yaml_str).unwrap();
+
+    assert_eq!(config.theme.menu_corner_radius, 6.0);
+    assert_eq!(config.theme.toast_corner_radius, 6.0);
+    assert_eq!(config.theme.accent_color, "#FF5500");
+    assert_eq!(config.theme.accent_opacity, 0.9);
+    assert_eq!(config.theme.main_bg_color, "#101010");
+    assert_eq!(config.theme.main_bg_opacity, 0.95);
+    assert_eq!(config.theme.border_color, "#445566");
+    assert_eq!(config.theme.text_primary, "#EEEEEE");
+    assert_eq!(config.theme.text_secondary, "#888888");
+    assert_eq!(config.theme.text_accent, "#FF5500");
+
+    assert_eq!(config.theme.wheel.hover_glow_color, "#FF5500");
+    assert_eq!(config.theme.wheel.spoke_color, "#CCCCCC");
+
+    // Test parse_hex_color
+    let (r, g, b) = winpie::config::parse_hex_color(&config.theme.accent_color);
+    assert_eq!((r, g, b), (255.0, 85.0, 0.0));
 }
 
 #[test]
@@ -165,6 +252,59 @@ wheel:
     assert_eq!(config.get_command_for_sector(Sector::N), Some("wt.exe"));
     assert_eq!(config.get_command_for_sector(Sector::S), None);
     assert_eq!(config.get_command_for_sector(Sector::W), None);
+}
+
+#[test]
+fn test_menu_and_tooltip_config_deserialization() {
+    let yaml_str = r#"
+wheel:
+  labels:
+    N: "Dev Tools"
+  tooltips:
+    N: "Dev tools and compilers"
+    E: "Sublime text"
+  menus:
+    N:
+      title: "Dev Tools"
+      tooltip: "Dev tools submenu tooltip"
+      items:
+        a:
+          label: "VS Code"
+          tooltip: "Launch VS Code"
+          command: "code.exe"
+        d:
+          label: "Build Tools"
+          menu:
+            title: "Build Actions"
+            items:
+              c:
+                label: "Clean"
+                command: "cargo clean"
+"#;
+    let config: winpie::config::AppConfig = serde_yaml::from_str(yaml_str).unwrap();
+
+    assert_eq!(config.get_label_for_sector(Sector::N), "Dev Tools");
+    assert_eq!(config.get_tooltip_for_sector(Sector::N), Some("Dev tools and compilers"));
+    assert_eq!(config.get_tooltip_for_sector(Sector::E), Some("Sublime text"));
+    assert_eq!(config.get_tooltip_for_sector(Sector::S), None);
+
+    let menu_n = config.get_menu_for_sector(Sector::N).expect("Menu N should exist");
+    assert_eq!(menu_n.title, "Dev Tools");
+    assert_eq!(menu_n.items.len(), 2);
+
+    let item_a = menu_n.items.get(&'a').expect("Item 'a' should exist");
+    assert_eq!(item_a.label, "VS Code");
+    assert_eq!(item_a.tooltip, Some("Launch VS Code".to_string()));
+    assert_eq!(item_a.command, Some("code.exe".to_string()));
+    assert!(item_a.menu.is_none());
+
+    let item_d = menu_n.items.get(&'d').expect("Item 'd' should exist");
+    assert_eq!(item_d.label, "Build Tools");
+    assert!(item_d.command.is_none());
+    let nested_d = item_d.menu.as_ref().expect("Nested menu should exist");
+    assert_eq!(nested_d.title, "Build Actions");
+    let item_c = nested_d.items.get(&'c').expect("Item 'c' should exist");
+    assert_eq!(item_c.command, Some("cargo clean".to_string()));
 }
 
 #[test]

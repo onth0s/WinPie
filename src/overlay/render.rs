@@ -9,7 +9,7 @@ use windows::Win32::Graphics::Gdi::{
     DT_CALCRECT, DT_CENTER, DT_NOPREFIX, DT_SINGLELINE, DT_VCENTER, TRANSPARENT,
 };
 
-use crate::config::AppConfig;
+use crate::config::{parse_hex_color, AppConfig, ThemeConfig};
 use crate::geometry::Sector;
 
 /// Generates all 9 precomputed 32-bit ARGB buffers:
@@ -21,9 +21,11 @@ pub fn generate_precomputed_buffers(
     radius: f64,
     deadzone: f64,
     rotation: f64,
+    profile_idx: Option<usize>,
 ) -> [Vec<u32>; 9] {
     let pixel_count = (size * size) as usize;
     let mut precomputed_buffers: [Vec<u32>; 9] = Default::default();
+    let theme = config.get_theme_for_profile(profile_idx);
 
     for (i, buf) in precomputed_buffers.iter_mut().enumerate() {
         let hover_opt = if i == 0 {
@@ -32,10 +34,10 @@ pub fn generate_precomputed_buffers(
             Some(Sector::from_index(i - 1))
         };
         buf.resize(pixel_count, 0u32);
-        rasterize_wheel_pixels(size, radius, deadzone, rotation, buf, hover_opt);
+        rasterize_wheel_pixels(size, radius, deadzone, rotation, theme, buf, hover_opt);
 
         if config.rendering.show_labels {
-            overlay_labels(size, radius, deadzone, rotation, config, buf, hover_opt);
+            overlay_labels(size, radius, deadzone, rotation, config, theme, profile_idx, buf, hover_opt);
         }
     }
 
@@ -47,11 +49,31 @@ pub fn rasterize_wheel_pixels(
     r: f64,
     dz: f64,
     rotation: f64,
+    theme: &ThemeConfig,
     pixels: &mut [u32],
     hover: Option<Sector>,
 ) {
     let cx = size as f64 / 2.0;
     let cy = size as f64 / 2.0;
+
+    // Theme color parsing
+    let (spoke_r, spoke_g, spoke_b) = parse_hex_color(&theme.wheel.spoke_color);
+    let spoke_a = (theme.wheel.spoke_opacity.clamp(0.0, 1.0) * 255.0).round();
+
+    let (rim_r, rim_g, rim_b) = parse_hex_color(&theme.wheel.rim_color);
+    let rim_a = (theme.wheel.rim_opacity.clamp(0.0, 1.0) * 255.0).round();
+
+    let (hover_r, hover_g, hover_b) = parse_hex_color(&theme.wheel.hover_glow_color);
+    let hover_a = (theme.wheel.hover_glow_opacity.clamp(0.0, 1.0) * 255.0).round();
+
+    let (sec_r, sec_g, sec_b) = parse_hex_color(&theme.wheel.sector_bg_color);
+    let sec_a = (theme.wheel.sector_bg_opacity.clamp(0.0, 1.0) * 255.0).round();
+
+    let (dz_r, dz_g, dz_b) = parse_hex_color(&theme.wheel.deadzone_bg_color);
+    let dz_a = (theme.wheel.deadzone_bg_opacity.clamp(0.0, 1.0) * 255.0).round();
+
+    let (dz_border_r, dz_border_g, dz_border_b) = parse_hex_color(&theme.wheel.deadzone_border_color);
+    let dz_border_a = (theme.wheel.deadzone_border_opacity.clamp(0.0, 1.0) * 255.0).round();
 
     // Precompute normal vectors for the 8 spoke dividing rays
     let mut spoke_normals = [(0.0f64, 0.0f64, 0.0f64, 0.0f64); 8];
@@ -98,20 +120,20 @@ pub fn rasterize_wheel_pixels(
                 }
 
                 if dist <= dz {
-                    // Inside deadzone: smooth circular boundary, NO center dot!
+                    // Inside deadzone: smooth circular boundary, NO center dot
                     if dist >= dz - 1.5 {
-                        let a = 220.0;
+                        let a = dz_border_a;
                         total_a += a;
-                        total_r += 240.0 * a / 255.0;
-                        total_g += 240.0 * a / 255.0;
-                        total_b += 240.0 * a / 255.0;
+                        total_r += dz_border_r * a / 255.0;
+                        total_g += dz_border_g * a / 255.0;
+                        total_b += dz_border_b * a / 255.0;
                     } else {
                         // Dark translucent deadzone core
-                        let a = 130.0;
+                        let a = dz_a;
                         total_a += a;
-                        total_r += 20.0 * a / 255.0;
-                        total_g += 20.0 * a / 255.0;
-                        total_b += 20.0 * a / 255.0;
+                        total_r += dz_r * a / 255.0;
+                        total_g += dz_g * a / 255.0;
+                        total_b += dz_b * a / 255.0;
                     }
                 } else {
                     // Sector ring
@@ -135,31 +157,29 @@ pub fn rasterize_wheel_pixels(
                     let is_rim = dist >= r - 2.0;
 
                     if is_spoke {
-                        let a = 190.0;
+                        let a = spoke_a;
                         total_a += a;
-                        total_r += 235.0 * a / 255.0;
-                        total_g += 235.0 * a / 255.0;
-                        total_b += 235.0 * a / 255.0;
+                        total_r += spoke_r * a / 255.0;
+                        total_g += spoke_g * a / 255.0;
+                        total_b += spoke_b * a / 255.0;
                     } else if is_rim {
-                        let a = 220.0;
+                        let a = rim_a;
                         total_a += a;
-                        total_r += 240.0 * a / 255.0;
-                        total_g += 240.0 * a / 255.0;
-                        total_b += 240.0 * a / 255.0;
+                        total_r += rim_r * a / 255.0;
+                        total_g += rim_g * a / 255.0;
+                        total_b += rim_b * a / 255.0;
                     } else if is_hovered {
-                        // Cyan glow
-                        let a = 220.0;
+                        let a = hover_a;
                         total_a += a;
-                        total_r += 0.0 * a / 255.0;
-                        total_g += 175.0 * a / 255.0;
-                        total_b += 255.0 * a / 255.0;
+                        total_r += hover_r * a / 255.0;
+                        total_g += hover_g * a / 255.0;
+                        total_b += hover_b * a / 255.0;
                     } else {
-                        // Frosted glass
-                        let a = 150.0;
+                        let a = sec_a;
                         total_a += a;
-                        total_r += 22.0 * a / 255.0;
-                        total_g += 24.0 * a / 255.0;
-                        total_b += 30.0 * a / 255.0;
+                        total_r += sec_r * a / 255.0;
+                        total_g += sec_g * a / 255.0;
+                        total_b += sec_b * a / 255.0;
                     }
                 }
             }
@@ -180,12 +200,15 @@ pub fn rasterize_wheel_pixels(
 /// Renders anti-aliased sector labels into the precomputed 32-bit ARGB buffer.
 /// Uses a temporary memory DC and ClearType font, reading the rendered glyph mask
 /// to composite text with clean pre-multiplied alpha onto the radial menu.
+#[allow(clippy::too_many_arguments)]
 pub fn overlay_labels(
     size: i32,
     radius: f64,
     deadzone: f64,
     rotation: f64,
     config: &AppConfig,
+    theme: &ThemeConfig,
+    profile_idx: Option<usize>,
     pixels: &mut [u32],
     hover: Option<Sector>,
 ) {
@@ -250,7 +273,7 @@ pub fn overlay_labels(
             let text_pixels = std::slice::from_raw_parts_mut(bits_ptr as *mut u32, (size * size) as usize);
 
             for sector in Sector::ALL {
-                let label = config.get_label_for_sector(sector);
+                let label = config.get_label_for_sector_with_profile(sector, profile_idx);
                 if label.is_empty() {
                     continue;
                 }
@@ -321,6 +344,8 @@ pub fn overlay_labels(
                 );
 
                 let is_hovered = hover == Some(sector);
+                let (hover_txt_r, hover_txt_g, hover_txt_b) = parse_hex_color(&theme.text_primary);
+                let (unhover_txt_r, unhover_txt_g, unhover_txt_b) = parse_hex_color(&theme.text_secondary);
 
                 // Composite text pixels into destination pre-multiplied ARGB buffer
                 for py in clip_y0..clip_y1 {
@@ -344,11 +369,11 @@ pub fn overlay_labels(
 
                             let src_a = text_alpha / 255.0;
 
-                            // Target text color: pure bright white for hover, subtle off-white for unhovered
+                            // Target text color from theme
                             let (src_r_val, src_g_val, src_b_val) = if is_hovered {
-                                (255.0, 255.0, 255.0)
+                                (hover_txt_r, hover_txt_g, hover_txt_b)
                             } else {
-                                (230.0, 235.0, 240.0)
+                                (unhover_txt_r, unhover_txt_g, unhover_txt_b)
                             };
 
                             let src_r = src_r_val * src_a;

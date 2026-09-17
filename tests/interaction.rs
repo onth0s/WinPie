@@ -170,3 +170,205 @@ fn test_at_019_wait_release_and_rearm() {
     assert_eq!(eff, InteractionEffect::Activated { anchor: Point::new(300, 300) });
     assert_eq!(fsm.state, State::Active { anchor: Point::new(300, 300), hover: None });
 }
+
+#[test]
+fn test_modal_menu_spawn_and_keyup_execution() {
+    use std::collections::HashMap;
+    use winpie::config::{MenuDefinition, MenuItem};
+
+    let mut items = HashMap::new();
+    items.insert('a', MenuItem {
+        label: "VS Code".to_string(),
+        tooltip: Some("Launch VS Code".to_string()),
+        command: Some("code.exe".to_string()),
+        menu: None,
+    });
+    items.insert('s', MenuItem {
+        label: "Sublime".to_string(),
+        tooltip: None,
+        command: Some("sublime.exe".to_string()),
+        menu: None,
+    });
+
+    let menu = MenuDefinition {
+        title: "Dev Tools".to_string(),
+        tooltip: None,
+        items,
+    };
+
+    let mut fsm = InteractionFsm::new(GeometryConfig::default());
+    let anchor = Point::new(200, 200);
+
+    // 1. Spawn menu
+    let eff = fsm.transition(InteractionEvent::MenuSpawn { anchor, menu: menu.clone() });
+    assert_eq!(eff, InteractionEffect::MenuSpawned { anchor, menu: menu.clone() });
+    assert!(fsm.is_modal_menu());
+    assert_eq!(fsm.active_anchor(), Some(anchor));
+    assert_eq!(fsm.highlighted_menu_key(), None);
+
+    // 2. KeyDown 'a' -> Highlight changed
+    let eff = fsm.transition(InteractionEvent::MenuKeyDown('a'));
+    assert!(matches!(eff, InteractionEffect::MenuHighlightChanged { key: Some('a'), .. }));
+    assert_eq!(fsm.highlighted_menu_key(), Some('a'));
+
+    // 3. KeyUp 'a' -> Executes code.exe and transitions to Idle
+    let eff = fsm.transition(InteractionEvent::MenuKeyUp('a', false));
+    assert_eq!(eff, InteractionEffect::MenuExecuted {
+        command: "code.exe".to_string(),
+        label: "VS Code".to_string(),
+    });
+    assert_eq!(fsm.state, State::Idle);
+}
+
+#[test]
+fn test_modal_menu_drill_down_tab_loop_and_shift_tab() {
+    use std::collections::HashMap;
+    use winpie::config::{MenuDefinition, MenuItem};
+
+    let mut child_items = HashMap::new();
+    child_items.insert('c', MenuItem {
+        label: "Cargo Clean".to_string(),
+        tooltip: None,
+        command: Some("cargo clean".to_string()),
+        menu: None,
+    });
+
+    let child_menu = MenuDefinition {
+        title: "Build Submenu".to_string(),
+        tooltip: None,
+        items: child_items,
+    };
+
+    let mut root_items = HashMap::new();
+    root_items.insert('d', MenuItem {
+        label: "Build Tools".to_string(),
+        tooltip: None,
+        command: None,
+        menu: Some(child_menu.clone()),
+    });
+
+    let root_menu = MenuDefinition {
+        title: "Dev Tools".to_string(),
+        tooltip: None,
+        items: root_items,
+    };
+
+    let mut fsm = InteractionFsm::new(GeometryConfig::default());
+    let anchor = Point::new(300, 300);
+    fsm.transition(InteractionEvent::MenuSpawn { anchor, menu: root_menu.clone() });
+
+    // KeyDown 'd' then KeyUp 'd' -> Drills down into child menu
+    fsm.transition(InteractionEvent::MenuKeyDown('d'));
+    let eff = fsm.transition(InteractionEvent::MenuKeyUp('d', false));
+    assert_eq!(eff, InteractionEffect::MenuDrillDown { menu: child_menu.clone() });
+    assert_eq!(fsm.current_menu(), Some(&child_menu));
+    assert_eq!(fsm.menu_nav_stack().unwrap().len(), 2);
+
+    // Shift+Tab -> Backtracks to root menu
+    let eff = fsm.transition(InteractionEvent::MenuTab { shift: true });
+    assert_eq!(eff, InteractionEffect::MenuBacktracked { current_menu: root_menu.clone() });
+    assert_eq!(fsm.current_menu(), Some(&root_menu));
+    assert_eq!(fsm.menu_nav_stack().unwrap().len(), 1);
+
+    // Drill down again
+    fsm.transition(InteractionEvent::MenuKeyDown('d'));
+    fsm.transition(InteractionEvent::MenuKeyUp('d', false));
+    assert_eq!(fsm.menu_nav_stack().unwrap().len(), 2);
+
+    // Tab -> Loops/Resets back to root menu
+    let eff = fsm.transition(InteractionEvent::MenuTab { shift: false });
+    assert_eq!(eff, InteractionEffect::MenuResetToRoot { current_menu: root_menu.clone() });
+    assert_eq!(fsm.current_menu(), Some(&root_menu));
+    assert_eq!(fsm.menu_nav_stack().unwrap().len(), 1);
+}
+
+#[test]
+fn test_modal_menu_cancel_on_esc_and_rmb() {
+    use std::collections::HashMap;
+    use winpie::config::{MenuDefinition, MenuItem};
+
+    let mut items = HashMap::new();
+    items.insert('x', MenuItem {
+        label: "Test".to_string(),
+        tooltip: None,
+        command: Some("test.exe".to_string()),
+        menu: None,
+    });
+
+    let menu = MenuDefinition {
+        title: "Test Menu".to_string(),
+        tooltip: None,
+        items,
+    };
+
+    let mut fsm = InteractionFsm::new(GeometryConfig::default());
+    let anchor = Point::new(100, 100);
+
+    // Cancel via Esc while key held down
+    fsm.transition(InteractionEvent::MenuSpawn { anchor, menu: menu.clone() });
+    fsm.transition(InteractionEvent::MenuKeyDown('x'));
+    let eff = fsm.transition(InteractionEvent::MenuEsc(false));
+    assert_eq!(eff, InteractionEffect::Cancelled);
+    assert_eq!(fsm.state, State::Idle);
+
+    // Cancel via RMB
+    fsm.transition(InteractionEvent::MenuSpawn { anchor, menu });
+    let eff = fsm.transition(InteractionEvent::RButtonDown(Point::new(100, 100), false));
+    assert_eq!(eff, InteractionEffect::Cancelled);
+    assert_eq!(fsm.state, State::Idle);
+}
+
+#[test]
+fn test_modal_menu_mouse_hover_and_click() {
+    use std::collections::HashMap;
+    use winpie::config::{MenuDefinition, MenuItem};
+
+    let mut items = HashMap::new();
+    items.insert('a', MenuItem {
+        label: "VS Code".to_string(),
+        tooltip: Some("Launch VS Code".to_string()),
+        command: Some("code.exe".to_string()),
+        menu: None,
+    });
+    items.insert('t', MenuItem {
+        label: "Terminal".to_string(),
+        tooltip: Some("Open Terminal".to_string()),
+        command: Some("wt.exe".to_string()),
+        menu: None,
+    });
+
+    let menu = MenuDefinition {
+        title: "Dev Tools".to_string(),
+        tooltip: None,
+        items,
+    };
+
+    let mut fsm = InteractionFsm::new(GeometryConfig::default());
+    let anchor = Point::new(400, 400);
+
+    fsm.transition(InteractionEvent::MenuSpawn { anchor, menu });
+
+    // 1. Mouse hover over 'a'
+    let eff = fsm.transition(InteractionEvent::MenuHover(Some('a')));
+    assert_eq!(fsm.highlighted_menu_key(), Some('a'));
+    if let InteractionEffect::MenuHighlightChanged { key, item } = eff {
+        assert_eq!(key, Some('a'));
+        assert_eq!(item.unwrap().label, "VS Code");
+    } else {
+        panic!("Expected MenuHighlightChanged effect");
+    }
+
+    // 2. Mouse hover out of items
+    let eff = fsm.transition(InteractionEvent::MenuHover(None));
+    assert_eq!(fsm.highlighted_menu_key(), None);
+    assert!(matches!(eff, InteractionEffect::MenuHighlightChanged { key: None, item: None }));
+
+    // 3. Mouse click on 't' -> Direct execution
+    let eff = fsm.transition(InteractionEvent::MenuSelect('t', false));
+    assert_eq!(eff, InteractionEffect::MenuExecuted {
+        command: "wt.exe".to_string(),
+        label: "Terminal".to_string(),
+    });
+    assert_eq!(fsm.state, State::Idle);
+}
+

@@ -13,7 +13,9 @@ use crate::overlay::render::generate_precomputed_buffers;
 pub struct OverlayWindow {
     hwnd: HWND,
     size: i32,
-    precomputed_buffers: [Vec<u32>; 9], // 0 = None (deadzone/unhovered), 1..=8 = Sector::from_index(i-1)
+    default_buffers: [Vec<u32>; 9], // 0 = None (deadzone/unhovered), 1..=8 = Sector::from_index(i-1)
+    profile_buffers: Vec<[Vec<u32>; 9]>, // Indexed by profile_idx
+    active_profile_idx: std::cell::Cell<Option<usize>>,
 }
 
 impl OverlayWindow {
@@ -61,20 +63,36 @@ impl OverlayWindow {
                 None,
             )?;
 
-            // Precompute all 9 bitmaps (0 = unhovered, 1..=8 = each sector hovered)
-            // Pre-rasterizing once on startup means hover switching during interaction is an instantaneous 0ms blit!
-            let precomputed_buffers = generate_precomputed_buffers(
+            // Precompute default buffer set (all 9 states)
+            let default_buffers = generate_precomputed_buffers(
                 config,
                 size,
                 radius as f64,
                 deadzone as f64,
                 rotation,
+                None,
             );
+
+            // Precompute profile buffer sets for all configured profiles
+            let mut profile_buffers = Vec::with_capacity(config.profiles.len());
+            for (idx, _) in config.profiles.iter().enumerate() {
+                let p_bufs = generate_precomputed_buffers(
+                    config,
+                    size,
+                    radius as f64,
+                    deadzone as f64,
+                    rotation,
+                    Some(idx),
+                );
+                profile_buffers.push(p_bufs);
+            }
 
             Ok(Self {
                 hwnd,
                 size,
-                precomputed_buffers,
+                default_buffers,
+                profile_buffers,
+                active_profile_idx: std::cell::Cell::new(None),
             })
         }
     }
@@ -83,7 +101,8 @@ impl OverlayWindow {
         self.hwnd
     }
 
-    pub fn show_at(&self, center: Point, hover: Option<Sector>) {
+    pub fn show_at(&self, center: Point, hover: Option<Sector>, profile_idx: Option<usize>) {
+        self.active_profile_idx.set(profile_idx);
         let half = self.size / 2;
         let left = center.x - half;
         let top = center.y - half;
@@ -118,7 +137,17 @@ impl OverlayWindow {
             None => 0,
             Some(sector) => (sector as usize) + 1,
         };
-        let src_pixels = &self.precomputed_buffers[buffer_idx];
+
+        let profile_idx = self.active_profile_idx.get();
+        let src_pixels = if let Some(idx) = profile_idx {
+            if let Some(p_bufs) = self.profile_buffers.get(idx) {
+                &p_bufs[buffer_idx]
+            } else {
+                &self.default_buffers[buffer_idx]
+            }
+        } else {
+            &self.default_buffers[buffer_idx]
+        };
 
         unsafe {
             let screen_dc = GetDC(None);

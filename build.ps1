@@ -109,6 +109,28 @@ if (Test-Path $exePath) {
     $sizeMb = [math]::Round($item.Length / 1MB, 2)
     Write-Host "[SUCCESS] Artifact: $exePath" -ForegroundColor Green
     Write-Host "[INFO]    Binary Size: $sizeMb MB ($sizeKb KB)" -ForegroundColor DarkCyan
+
+    # 5. Link to PATH (.cargo\bin) & create Windows Startup Shortcut if Release
+    if ($Release) {
+        $cargoBin = Join-Path $env:USERPROFILE ".cargo\bin"
+        if (Test-Path $cargoBin) {
+            $destPath = Join-Path $cargoBin "winpie.exe"
+            Copy-Item -Path $exePath -Destination $destPath -Force
+            Write-Host "[PATH]    Linked to $destPath (Run 'winpie' from any terminal)" -ForegroundColor Green
+        }
+
+        $startupFolder = [System.IO.Path]::Combine($env:APPDATA, "Microsoft\Windows\Start Menu\Programs\Startup")
+        if (Test-Path $startupFolder) {
+            $shortcutPath = Join-Path $startupFolder "WinPie.lnk"
+            $wscript = New-Object -ComObject WScript.Shell
+            $shortcut = $wscript.CreateShortcut($shortcutPath)
+            $shortcut.TargetPath = $exePath
+            $shortcut.WorkingDirectory = $PSScriptRoot
+            $shortcut.Description = "WinPie Radial Menu Daemon"
+            $shortcut.Save()
+            Write-Host "[STARTUP] Created Startup Shortcut: $shortcutPath" -ForegroundColor Green
+        }
+    }
 }
 Write-Host "[INFO]    Elapsed Time: $elapsedSec s" -ForegroundColor DarkCyan
 Write-Host "----------------------------------------`n" -ForegroundColor DarkGray

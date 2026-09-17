@@ -6,3 +6,5 @@ pub mod input;
 pub mod diagnostics;
 pub mod app;
 pub mod executor;
+pub mod ipc;
+pub mod context;

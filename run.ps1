@@ -36,7 +36,7 @@ Write-Host "Press Win+Esc to open radial menu. Left-click/Win-up to commit. Righ
 Write-Host "Press Ctrl+C in this terminal to exit.`n" -ForegroundColor DarkGray
 
 if ($Release) {
-    cargo run --release
+    cargo run --release -- --foreground
 } else {
-    cargo run
+    cargo run -- --foreground
 }

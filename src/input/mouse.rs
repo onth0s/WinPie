@@ -21,8 +21,9 @@ pub unsafe extern "system" fn ll_mouse_proc(
         let msg = wparam.0 as u32;
 
         let active = IS_ACTIVE.load(Ordering::SeqCst);
+        let modal_active = IS_MODAL_MENU.load(Ordering::SeqCst);
 
-        if active {
+        if active || modal_active {
             match msg {
                 WM_MOUSEMOVE => {
                     let cur_x = mouse.pt.x;
@@ -60,6 +61,7 @@ pub unsafe extern "system" fn ll_mouse_proc(
                 }
                 WM_RBUTTONDOWN => {
                     set_active(false);
+                    set_modal_menu(false);
 
                     let tid = MAIN_THREAD_ID.load(Ordering::SeqCst);
                     if tid != 0 {

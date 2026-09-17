@@ -5,7 +5,10 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 
 use crate::geometry::Point;
 use super::state::*;
-use super::{WM_WINPIE_ACTIVATE, WM_WINPIE_ALLKEYSUP, WM_WINPIE_WINUP};
+use super::{
+    WM_WINPIE_ACTIVATE, WM_WINPIE_ALLKEYSUP, WM_WINPIE_MENU_ESC, WM_WINPIE_MENU_KEYDOWN,
+    WM_WINPIE_MENU_KEYUP, WM_WINPIE_MENU_TAB, WM_WINPIE_WINUP,
+};
 
 /// Low-level keyboard hook callback procedure.
 ///
@@ -19,24 +22,32 @@ pub unsafe extern "system" fn ll_keyboard_proc(
 ) -> LRESULT {
     if n_code >= 0 {
         let kbd = *(lparam.0 as *const KBDLLHOOKSTRUCT);
+
+        // Pass through synthetic Start-menu disarm mask key (0xE8)
+        if kbd.vkCode == 0xE8 {
+            return CallNextHookEx(None, n_code, wparam, lparam);
+        }
+
         let msg = wparam.0 as u32;
         let vk = VIRTUAL_KEY(kbd.vkCode as u16);
 
         let is_down = msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN;
         let is_up = msg == WM_KEYUP || msg == WM_SYSKEYUP;
 
-        // Accurately track Windows modifier keys
+        // Track Windows modifier keys
         if vk == VK_LWIN {
             LEFT_WIN_DOWN.store(is_down, Ordering::SeqCst);
         } else if vk == VK_RWIN {
             RIGHT_WIN_DOWN.store(is_down, Ordering::SeqCst);
         } else if vk == VK_ESCAPE {
             ESCAPE_DOWN.store(is_down, Ordering::SeqCst);
+        } else if vk == VK_SHIFT || vk == VK_LSHIFT || vk == VK_RSHIFT {
+            SHIFT_DOWN.store(is_down, Ordering::SeqCst);
         }
 
         let win_held = LEFT_WIN_DOWN.load(Ordering::SeqCst) || RIGHT_WIN_DOWN.load(Ordering::SeqCst);
 
-        // Clear WAIT_RELEASE once both Win and Esc have been physically released
+        // Clear WAIT_RELEASE once all activation keys have been physically released
         if is_up
             && !win_held
             && !ESCAPE_DOWN.load(Ordering::SeqCst)
@@ -53,12 +64,68 @@ pub unsafe extern "system" fn ll_keyboard_proc(
             }
         }
 
-        // Activation check: Win held + Escape DOWN
+        let modal_active = IS_MODAL_MENU.load(Ordering::SeqCst);
+
+        // 1. Modal Menu active input handling
+        if modal_active {
+            let tid = MAIN_THREAD_ID.load(Ordering::SeqCst);
+
+            if vk == VK_ESCAPE && is_down {
+                if tid != 0 {
+                    let _ = PostThreadMessageW(
+                        tid,
+                        WM_WINPIE_MENU_ESC,
+                        WPARAM(0),
+                        LPARAM(0),
+                    );
+                }
+                return LRESULT(1);
+            }
+
+            if vk == VK_TAB && is_down {
+                let shift = SHIFT_DOWN.load(Ordering::SeqCst);
+                if tid != 0 {
+                    let _ = PostThreadMessageW(
+                        tid,
+                        WM_WINPIE_MENU_TAB,
+                        WPARAM(if shift { 1 } else { 0 }),
+                        LPARAM(0),
+                    );
+                }
+                return LRESULT(1);
+            }
+
+            // Alphanumeric shortcut keys (A-Z, 0-9)
+            if (kbd.vkCode >= 0x41 && kbd.vkCode <= 0x5A) || (kbd.vkCode >= 0x30 && kbd.vkCode <= 0x39) {
+                let ch = ((kbd.vkCode as u8) as char).to_ascii_lowercase();
+                if tid != 0 {
+                    let post_msg = if is_down {
+                        WM_WINPIE_MENU_KEYDOWN
+                    } else {
+                        WM_WINPIE_MENU_KEYUP
+                    };
+                    let _ = PostThreadMessageW(
+                        tid,
+                        post_msg,
+                        WPARAM(ch as usize),
+                        LPARAM(0),
+                    );
+                }
+                return LRESULT(1);
+            }
+
+            // Swallow any other key while modal menu is open to prevent leaking into foreground app
+            if vk != VK_SHIFT && vk != VK_LSHIFT && vk != VK_RSHIFT && vk != VK_CONTROL && vk != VK_MENU {
+                return LRESULT(1);
+            }
+        }
+
+        // 2. Radial Menu activation check: Win held + Escape DOWN
         if is_down && vk == VK_ESCAPE && win_held {
             let was_active = IS_ACTIVE.load(Ordering::SeqCst);
             let blocked = REQUIRE_KEY_RELEASE.load(Ordering::SeqCst);
 
-            if !was_active && !blocked {
+            if !was_active && !blocked && !modal_active {
                 // Reset mouse deduplication
                 reset_dedup();
 
@@ -80,12 +147,12 @@ pub unsafe extern "system" fn ll_keyboard_proc(
                     );
                 }
                 return LRESULT(1);
-            } else if was_active || blocked {
+            } else if was_active || blocked || modal_active {
                 return LRESULT(1);
             }
         }
 
-        // On Win key release while active: trigger commit or cancel check
+        // 3. On Win key release while radial wheel active: trigger commit or cancel check
         if is_up && (vk == VK_LWIN || vk == VK_RWIN) {
             let was_active = IS_ACTIVE.load(Ordering::SeqCst);
             if was_active && !win_held {

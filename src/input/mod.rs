@@ -18,6 +18,12 @@ pub const WM_WINPIE_RBUTTONDOWN: u32 = WM_USER + 104;
 pub const WM_WINPIE_WINUP: u32 = WM_USER + 105;
 pub const WM_WINPIE_ALLKEYSUP: u32 = WM_USER + 106;
 
+// Modal Menu custom thread messages
+pub const WM_WINPIE_MENU_KEYDOWN: u32 = WM_USER + 107;
+pub const WM_WINPIE_MENU_KEYUP: u32 = WM_USER + 108;
+pub const WM_WINPIE_MENU_TAB: u32 = WM_USER + 109;
+pub const WM_WINPIE_MENU_ESC: u32 = WM_USER + 110;
+
 pub struct InputManager {
     kbd_hook: HHOOK,
     mouse_hook: HHOOK,
@@ -55,6 +61,10 @@ impl InputManager {
 
     pub fn set_active(&self, active: bool) {
         state::set_active(active);
+    }
+
+    pub fn set_modal_menu(&self, active: bool) {
+        state::set_modal_menu(active);
     }
 }
 
