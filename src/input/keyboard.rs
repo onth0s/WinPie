@@ -45,12 +45,12 @@ pub unsafe extern "system" fn ll_keyboard_proc(
             SHIFT_DOWN.store(is_down, Ordering::SeqCst);
         }
 
-        let win_held = LEFT_WIN_DOWN.load(Ordering::SeqCst) || RIGHT_WIN_DOWN.load(Ordering::SeqCst);
+        let win_held = is_win_physically_held();
 
         // Clear WAIT_RELEASE once all activation keys have been physically released
         if is_up
             && !win_held
-            && !ESCAPE_DOWN.load(Ordering::SeqCst)
+            && !is_escape_physically_held()
             && REQUIRE_KEY_RELEASE.swap(false, Ordering::SeqCst)
         {
             let tid = MAIN_THREAD_ID.load(Ordering::SeqCst);
@@ -123,9 +123,11 @@ pub unsafe extern "system" fn ll_keyboard_proc(
         // 2. Radial Menu activation check: Win held + Escape DOWN
         if is_down && vk == VK_ESCAPE && win_held {
             let was_active = IS_ACTIVE.load(Ordering::SeqCst);
-            let blocked = REQUIRE_KEY_RELEASE.load(Ordering::SeqCst);
 
-            if !was_active && !blocked && !modal_active {
+            // If Escape was just pressed down while Win is held, self-heal any stuck wait-release state
+            REQUIRE_KEY_RELEASE.store(false, Ordering::SeqCst);
+
+            if !was_active && !modal_active {
                 // Reset mouse deduplication
                 reset_dedup();
 
@@ -147,7 +149,7 @@ pub unsafe extern "system" fn ll_keyboard_proc(
                     );
                 }
                 return LRESULT(1);
-            } else if was_active || blocked || modal_active {
+            } else if was_active || modal_active {
                 return LRESULT(1);
             }
         }

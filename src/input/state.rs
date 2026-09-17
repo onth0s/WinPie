@@ -18,23 +18,59 @@ pub static LAST_POSTED_Y: AtomicI32 = AtomicI32::new(i32::MIN);
 // WAIT_RELEASE state: WinPie will NOT re-activate until keys are released and pressed again.
 pub static REQUIRE_KEY_RELEASE: AtomicBool = AtomicBool::new(false);
 
+/// Checks if Windows key is physically pressed down right now via Win32 hardware query or atomic tracking.
+pub fn is_win_physically_held() -> bool {
+    let raw_lwin = unsafe { (GetAsyncKeyState(VK_LWIN.0 as i32) as u16 & 0x8000) != 0 };
+    let raw_rwin = unsafe { (GetAsyncKeyState(VK_RWIN.0 as i32) as u16 & 0x8000) != 0 };
+    let atomic_held = LEFT_WIN_DOWN.load(Ordering::SeqCst) || RIGHT_WIN_DOWN.load(Ordering::SeqCst);
+    raw_lwin || raw_rwin || atomic_held
+}
+
+/// Checks if Escape key is physically pressed down right now via Win32 hardware query or atomic tracking.
+pub fn is_escape_physically_held() -> bool {
+    let raw_esc = unsafe { (GetAsyncKeyState(VK_ESCAPE.0 as i32) as u16 & 0x8000) != 0 };
+    let atomic_esc = ESCAPE_DOWN.load(Ordering::SeqCst);
+    raw_esc || atomic_esc
+}
+
 pub fn are_keys_held() -> bool {
-    let win_held = LEFT_WIN_DOWN.load(Ordering::SeqCst) || RIGHT_WIN_DOWN.load(Ordering::SeqCst);
-    let esc_held = ESCAPE_DOWN.load(Ordering::SeqCst);
-    win_held || esc_held
+    is_win_physically_held() || is_escape_physically_held()
+}
+
+/// Synchronizes atomic key states with physical hardware and auto-recovers from any stuck states.
+pub fn sync_hardware_key_states() {
+    let raw_lwin = unsafe { (GetAsyncKeyState(VK_LWIN.0 as i32) as u16 & 0x8000) != 0 };
+    let raw_rwin = unsafe { (GetAsyncKeyState(VK_RWIN.0 as i32) as u16 & 0x8000) != 0 };
+    let raw_esc = unsafe { (GetAsyncKeyState(VK_ESCAPE.0 as i32) as u16 & 0x8000) != 0 };
+
+    LEFT_WIN_DOWN.store(raw_lwin, Ordering::SeqCst);
+    RIGHT_WIN_DOWN.store(raw_rwin, Ordering::SeqCst);
+    ESCAPE_DOWN.store(raw_esc, Ordering::SeqCst);
+
+    if !raw_lwin && !raw_rwin && !raw_esc {
+        REQUIRE_KEY_RELEASE.store(false, Ordering::SeqCst);
+    }
 }
 
 pub fn set_active(active: bool) {
     IS_ACTIVE.store(active, Ordering::SeqCst);
-    if !active && are_keys_held() {
-        REQUIRE_KEY_RELEASE.store(true, Ordering::SeqCst);
+    if !active {
+        if are_keys_held() {
+            REQUIRE_KEY_RELEASE.store(true, Ordering::SeqCst);
+        } else {
+            REQUIRE_KEY_RELEASE.store(false, Ordering::SeqCst);
+        }
     }
 }
 
 pub fn set_modal_menu(active: bool) {
     IS_MODAL_MENU.store(active, Ordering::SeqCst);
-    if !active && are_keys_held() {
-        REQUIRE_KEY_RELEASE.store(true, Ordering::SeqCst);
+    if !active {
+        if are_keys_held() {
+            REQUIRE_KEY_RELEASE.store(true, Ordering::SeqCst);
+        } else {
+            REQUIRE_KEY_RELEASE.store(false, Ordering::SeqCst);
+        }
     }
 }
 
