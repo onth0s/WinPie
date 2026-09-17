@@ -45,12 +45,13 @@ pub unsafe extern "system" fn ll_keyboard_proc(
             SHIFT_DOWN.store(is_down, Ordering::SeqCst);
         }
 
-        let win_held = is_win_physically_held();
+        let win_held = is_win_down();
+        let esc_held = is_escape_down();
 
         // Clear WAIT_RELEASE once all activation keys have been physically released
         if is_up
             && !win_held
-            && !is_escape_physically_held()
+            && !esc_held
             && REQUIRE_KEY_RELEASE.swap(false, Ordering::SeqCst)
         {
             let tid = MAIN_THREAD_ID.load(Ordering::SeqCst);
