@@ -122,11 +122,9 @@ pub unsafe extern "system" fn ll_keyboard_proc(
         // 2. Radial Menu activation check: Win held + Escape DOWN
         if is_down && vk == VK_ESCAPE && win_held {
             let was_active = IS_ACTIVE.load(Ordering::SeqCst);
+            let require_release = REQUIRE_KEY_RELEASE.load(Ordering::SeqCst);
 
-            // If Escape was just pressed down while Win is held, self-heal any stuck wait-release state
-            REQUIRE_KEY_RELEASE.store(false, Ordering::SeqCst);
-
-            if !was_active && !modal_active {
+            if !was_active && !modal_active && !require_release {
                 // Reset mouse deduplication
                 reset_dedup();
 
@@ -148,7 +146,7 @@ pub unsafe extern "system" fn ll_keyboard_proc(
                     );
                 }
                 return LRESULT(1);
-            } else if was_active || modal_active {
+            } else if was_active || modal_active || require_release {
                 return LRESULT(1);
             }
         }
