@@ -29,6 +29,14 @@ if ($BuildOnly) {
     exit $LASTEXITCODE
 }
 
+# Kill any existing background or detached WinPie instances
+$running = Get-Process -Name winpie -ErrorAction SilentlyContinue
+if ($running) {
+    Write-Host "[KILL] Terminating existing WinPie process(es)..." -ForegroundColor Yellow
+    $running | Stop-Process -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Milliseconds 200
+}
+
 $mode = if ($Release) { "Release" } else { "Debug" }
 
 Write-Host "Starting WinPie ($mode)..." -ForegroundColor Cyan

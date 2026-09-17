@@ -40,6 +40,14 @@ if ($All) {
 $startTime = [System.Diagnostics.Stopwatch]::StartNew()
 $mode = if ($Release) { "Release" } else { "Debug" }
 
+# 0. Kill any running WinPie process before building/copying
+$running = Get-Process -Name winpie -ErrorAction SilentlyContinue
+if ($running) {
+    Write-Host "[KILL] Terminating existing WinPie process(es)..." -ForegroundColor Yellow
+    $running | Stop-Process -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Milliseconds 200
+}
+
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  WinPie Build Pipeline ($mode)" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
