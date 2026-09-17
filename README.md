@@ -257,6 +257,62 @@ theme:
     deadzone_bg_opacity: 0.51
     deadzone_border_color: "#F0F0F0"
     deadzone_border_opacity: 0.86
+
+profiles:
+  - name: "Visual Studio Code"
+    match_rules:
+      process: "code.exe"
+    wheel:
+      labels:
+        N: "Format Document"
+        NE: "Command Palette"
+        E: "Go to Symbol"
+        SE: "File Explorer"
+        S: "Toggle Terminal"
+        SW: "Git Status"
+        W: "Find in Files"
+        NW: "Toggle Sidebar"
+      tooltips:
+        N: "Format current active code document"
+        NE: "Open VS Code Command Palette"
+        E: "Quick jump to symbol in file"
+        SE: "Reveal file in Explorer sidebar"
+        S: "Toggle built-in integrated terminal"
+        SW: "Show Source Control git panel"
+        W: "Search across entire workspace"
+        NW: "Toggle primary sidebar visibility"
+      commands:
+        N: "cmd.exe /c code --command editor.action.formatDocument"
+        NE: "cmd.exe /c code --command workbench.action.showCommands"
+        S: "cmd.exe /c code --command workbench.action.terminal.toggleTerminal"
+        W: "cmd.exe /c code --command workbench.action.findInFiles"
+
+  - name: "Windows File Explorer"
+    match_rules:
+      process: "explorer.exe"
+      window_class: "CabinetWClass"
+    wheel:
+      labels:
+        N: "New Folder"
+        NE: "Terminal Here"
+        E: "VS Code Here"
+        SE: "Copy Path"
+        S: "Properties"
+        SW: "Select All"
+        W: "Git Bash Here"
+        NW: "Refresh"
+      tooltips:
+        N: "Create a new directory"
+        NE: "Open Windows Terminal in current directory"
+        E: "Open directory in Visual Studio Code"
+        SE: "Copy full path to clipboard"
+        S: "Open Properties window"
+        SW: "Select all items in folder"
+        W: "Open Git Bash here"
+        NW: "Refresh directory view"
+      commands:
+        NE: "wt.exe"
+        E: "code.exe ."
 ```
 
 ---
@@ -269,7 +325,7 @@ winpie/
 ├── build.ps1                 # Release build, testing, linter, PATH & Startup installer
 ├── run.ps1                   # Local runner script
 ├── config/
-│   └── default.yaml          # Runtime configuration & themes
+│   └── default.yaml          # Runtime configuration, themes & contextual profiles
 ├── spec/
 │   ├── INVARIANTS.yaml       # Formal invariant specifications
 │   ├── STATE_MACHINE.yaml    # Formal FSM definition
@@ -277,6 +333,7 @@ winpie/
 ├── src/
 │   ├── main.rs               # Entrypoint & CLI command dispatcher
 │   ├── app.rs                # Application runtime, DPI & Win32 message pump
+│   ├── context.rs            # Active window inspection & contextual profile matching
 │   ├── ipc.rs                # Win32 IPC, mutex, control window & autostart manager
 │   ├── input/
 │   │   ├── mod.rs            # WH_KEYBOARD_LL & WH_MOUSE_LL low-level hooks
@@ -299,6 +356,7 @@ winpie/
 │   ├── executor.rs           # Detached asynchronous command spawner
 │   └── diagnostics.rs        # Diagnostics logging & event tracking
 └── tests/
+    ├── context.rs            # Window context & contextual profile inheritance test suite
     ├── geometry.rs           # Geometry, label, theme, startup & toast test suite
     └── interaction.rs        # State machine, submenu & mouse hit-test verification
 ```
@@ -313,7 +371,7 @@ Run the full automated test suite:
 cargo test --all-targets
 ```
 
-All 30 unit and integration tests verify:
+All 35 unit and integration tests verify:
 - 8-way angular classification and rotation offsets
 - Multi-monitor negative virtual screen coordinate roundtrips
 - Deadzone and outer radius Euclidean boundaries
@@ -321,6 +379,7 @@ All 30 unit and integration tests verify:
 - Modal submenu key preview, keyup execution, and mouse hit-testing
 - Breadcrumb navigation (<kbd>Tab</kbd> loop, <kbd>Shift+Tab</kbd> backtrack, cancellation)
 - Universal theme parsing and startup toast configuration
+- Active window context inspection, process matching, and profile inheritance fallback
 
 ---
 
