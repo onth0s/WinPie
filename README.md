@@ -37,8 +37,10 @@ WinPie provides global, focus-preserving radial menu invocation anchored to the 
   - Sub-millisecond foreground window inspection using Win32 API (`GetForegroundWindow`, `GetClassNameW`, `QueryFullProcessImageNameW`).
   - Pre-rasterized buffers for every profile guaranteeing zero latency.
   - Seamless fallback and inheritance: unassigned sectors automatically inherit from the global default configuration.
+- **Live Context & Profile Inspector**:
+  - Run `winpie inspect` in any terminal to live-stream active window detection (Executable, Path, Window Class, Title), matched profile rules, and active sector overrides as you switch focus between applications.
 - **Command-Line Lifecycle & Single-Instance Daemon**:
-  - `winpie` operates both as a background daemon (with single-instance Mutex protection) and as a CLI control tool (`winpie kill`, `winpie reload`, `winpie status`, `winpie autostart`).
+  - `winpie` operates both as a background daemon (with single-instance Mutex protection) and as a CLI control tool (`winpie kill`, `winpie reload`, `winpie status`, `winpie inspect`, `winpie autostart`).
 - **Automated PATH Linking & Windows Startup**:
   - `build.ps1 -Release` automatically links `winpie.exe` into user `PATH` (`%USERPROFILE%\.cargo\bin\winpie.exe`) and creates the Windows Startup shortcut (`WinPie.lnk`).
 
@@ -66,6 +68,30 @@ DEFAULT CONTROLS:
   Left Click                   Commit sector or enter submenu
   Release Win Key              Commit hovered sector
   Right Click / Esc            Cancel menu
+```
+
+### Live Context Inspection
+
+To test and verify which profile triggers for your applications, run:
+
+```powershell
+winpie inspect
+```
+
+As you switch windows, `winpie inspect` prints live diagnostic output:
+
+```text
+[FOCUS CHANGED]
+  Executable : code.exe
+  Path       : C:\Users\...\Code.exe
+  Class      : Chrome_WidgetWin_1
+  Title      : WinPie - Visual Studio Code
+  Matched    : Profile #0 -> "Visual Studio Code"
+  Sector Bindings:
+    [ N] Format Document    (custom profile)
+    [NE] Command Palette    (custom profile)
+    [ E] Go to Symbol       (custom profile)
+    ...
 ```
 
 ---
