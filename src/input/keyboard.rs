@@ -114,10 +114,8 @@ pub unsafe extern "system" fn ll_keyboard_proc(
                 return LRESULT(1);
             }
 
-            // Swallow any other key while modal menu is open to prevent leaking into foreground app
-            if vk != VK_SHIFT && vk != VK_LSHIFT && vk != VK_RSHIFT && vk != VK_CONTROL && vk != VK_MENU {
-                return LRESULT(1);
-            }
+            // Allow all other keys (like Alt, Ctrl, Enter, Letters not in menu) to pass through naturally
+            // to avoid ever locking the system
         }
 
         // 2. Radial Menu activation check: Win held + Escape DOWN

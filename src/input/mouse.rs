@@ -75,7 +75,7 @@ pub unsafe extern "system" fn ll_mouse_proc(
                     return LRESULT(1);
                 }
                 WM_LBUTTONUP | WM_RBUTTONUP => {
-                    return LRESULT(1);
+                    // Let mouse up pass through to maintain Windows input integrity
                 }
                 _ => {}
             }
