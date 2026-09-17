@@ -121,7 +121,7 @@ impl InteractionFsm {
     /// Pure transition function adhering to STATE_MACHINE.yaml & Submenu Contracts
     pub fn transition(&mut self, event: InteractionEvent) -> InteractionEffect {
         match (&mut self.state, event) {
-            (State::Idle, InteractionEvent::WinEscDown(anchor)) => {
+            (State::Idle | State::WaitRelease, InteractionEvent::WinEscDown(anchor)) => {
                 self.state = State::Active {
                     anchor,
                     hover: None,
@@ -129,8 +129,7 @@ impl InteractionFsm {
                 InteractionEffect::Activated { anchor }
             }
 
-            // In WaitRelease or Active: ignore activation attempts
-            (State::WaitRelease, InteractionEvent::WinEscDown(_)) => InteractionEffect::None,
+            // In Active or ModalMenu: ignore activation attempts
             (State::Active { .. }, InteractionEvent::WinEscDown(_)) => InteractionEffect::None,
             (State::ModalMenu { .. }, InteractionEvent::WinEscDown(_)) => InteractionEffect::None,
 

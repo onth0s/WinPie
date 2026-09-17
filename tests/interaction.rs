@@ -155,11 +155,6 @@ fn test_at_019_wait_release_and_rearm() {
     assert_eq!(fsm.state, State::WaitRelease);
     assert!(fsm.is_waiting_release());
 
-    // Activation attempt while in WaitRelease is ignored
-    let eff = fsm.transition(InteractionEvent::WinEscDown(Point::new(300, 300)));
-    assert_eq!(eff, InteractionEffect::None);
-    assert_eq!(fsm.state, State::WaitRelease);
-
     // All keys released -> re-arms to Idle
     let eff = fsm.transition(InteractionEvent::AllKeysUp);
     assert_eq!(eff, InteractionEffect::Rearmed);
@@ -169,6 +164,13 @@ fn test_at_019_wait_release_and_rearm() {
     let eff = fsm.transition(InteractionEvent::WinEscDown(Point::new(300, 300)));
     assert_eq!(eff, InteractionEffect::Activated { anchor: Point::new(300, 300) });
     assert_eq!(fsm.state, State::Active { anchor: Point::new(300, 300), hover: None });
+
+    // Direct activation from WaitRelease (self-healing)
+    let _ = fsm.transition(InteractionEvent::LButtonDown(Point::new(300, 400), true));
+    assert_eq!(fsm.state, State::WaitRelease);
+    let eff = fsm.transition(InteractionEvent::WinEscDown(Point::new(400, 400)));
+    assert_eq!(eff, InteractionEffect::Activated { anchor: Point::new(400, 400) });
+    assert_eq!(fsm.state, State::Active { anchor: Point::new(400, 400), hover: None });
 }
 
 #[test]
