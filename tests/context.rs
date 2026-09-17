@@ -111,6 +111,42 @@ fn test_active_window_context_smoke() {
 fn test_is_process_running_smoke() {
     // explorer.exe is guaranteed to run on any logged-in Windows session
     assert!(is_process_running("explorer.exe"));
+    // case-insensitivity
+    assert!(is_process_running("EXPLORER.EXE"));
     // completely bogus executable should not be running
     assert!(!is_process_running("non_existent_fake_process_123456789.exe"));
+}
+
+#[test]
+fn test_context_matcher_title_and_combined_filters() {
+    let matcher = ContextMatcher {
+        process: Some("code.exe".to_string()),
+        window_class: Some("Chrome_WidgetWin_1".to_string()),
+        window_title: Some("WinPie".to_string()),
+    };
+
+    let ctx_match = WindowContext {
+        process_name: "code.exe".to_string(),
+        process_path: r"C:\Programs\VSCode\code.exe".to_string(),
+        window_class: "Chrome_WidgetWin_1".to_string(),
+        window_title: "src/main.rs - WinPie - Visual Studio Code".to_string(),
+    };
+
+    let ctx_diff_title = WindowContext {
+        process_name: "code.exe".to_string(),
+        process_path: r"C:\Programs\VSCode\code.exe".to_string(),
+        window_class: "Chrome_WidgetWin_1".to_string(),
+        window_title: "OtherProject - Visual Studio Code".to_string(),
+    };
+
+    let ctx_diff_proc = WindowContext {
+        process_name: "chrome.exe".to_string(),
+        process_path: r"C:\Programs\Chrome\chrome.exe".to_string(),
+        window_class: "Chrome_WidgetWin_1".to_string(),
+        window_title: "WinPie GitHub".to_string(),
+    };
+
+    assert!(matcher.matches(&ctx_match));
+    assert!(!matcher.matches(&ctx_diff_title));
+    assert!(!matcher.matches(&ctx_diff_proc));
 }

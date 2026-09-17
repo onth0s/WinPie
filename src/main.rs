@@ -11,6 +11,7 @@ fn print_help() {
     println!("  winpie kill                  Stop the running WinPie process");
     println!("  winpie reload                Restart / reload WinPie with updated config");
     println!("  winpie status                Check if WinPie is currently running");
+    println!("  winpie inspect               Live stream foreground window context & profile matching");
     println!("  winpie autostart enable      Launch WinPie automatically on Windows login");
     println!("  winpie autostart disable     Remove WinPie from Windows startup");
     println!("  winpie autostart status      Check Windows startup shortcut status");
@@ -21,6 +22,69 @@ fn print_help() {
     println!("  Left Click                   Commit sector or enter submenu");
     println!("  Release Win Key              Commit hovered sector");
     println!("  Right Click / Esc            Cancel menu\n");
+}
+
+fn run_inspector() -> Result<(), Box<dyn std::error::Error>> {
+    let config = winpie::config::AppConfig::load_or_default("config/default.yaml");
+    println!("============================================================");
+    println!("  WinPie Window Context & Profile Inspector");
+    println!("============================================================");
+    println!("Active Profiles Configured: {}", config.profiles.len());
+    for (i, p) in config.profiles.iter().enumerate() {
+        println!("  [{}] {} (match: process={:?}, class={:?}, title={:?})", 
+            i, p.name, p.match_rules.process, p.match_rules.window_class, p.match_rules.window_title);
+    }
+    println!("\nStreaming foreground window changes... Press Ctrl+C to exit.\n");
+
+    let mut last_ctx = winpie::context::WindowContext::default();
+
+    loop {
+        let ctx = winpie::context::active_window_context();
+        if ctx != last_ctx && (!ctx.process_name.is_empty() || !ctx.window_title.is_empty()) {
+            println!("------------------------------------------------------------");
+            println!("[FOCUS CHANGED]");
+            println!("  Executable : {}", if ctx.process_name.is_empty() { "<unknown>" } else { &ctx.process_name });
+            if !ctx.process_path.is_empty() {
+                println!("  Path       : {}", ctx.process_path);
+            }
+            if !ctx.window_class.is_empty() {
+                println!("  Class      : {}", ctx.window_class);
+            }
+            if !ctx.window_title.is_empty() {
+                println!("  Title      : {}", ctx.window_title);
+            }
+
+            let profile_idx = config.find_matching_profile(&ctx);
+            match profile_idx {
+                Some(idx) => {
+                    let profile = &config.profiles[idx];
+                    println!("  Matched    : Profile #{} -> \"{}\"", idx, profile.name);
+                    println!("  Sector Bindings:");
+                    for sector in &[
+                        winpie::geometry::Sector::N,
+                        winpie::geometry::Sector::NE,
+                        winpie::geometry::Sector::E,
+                        winpie::geometry::Sector::SE,
+                        winpie::geometry::Sector::S,
+                        winpie::geometry::Sector::SW,
+                        winpie::geometry::Sector::W,
+                        winpie::geometry::Sector::NW,
+                    ] {
+                        let label = config.get_label_for_sector_with_profile(*sector, Some(idx));
+                        let is_override = profile.wheel.labels.contains_key(sector.name()) || profile.wheel.menus.contains_key(sector.name());
+                        println!("    [{:>2}] {:<18} {}", sector.name(), label, if is_override { "(custom profile)" } else { "(inherited global)" });
+                    }
+                }
+                None => {
+                    println!("  Matched    : [Global Default] (no specific profile matched)");
+                }
+            }
+            println!();
+            last_ctx = ctx;
+        }
+
+        std::thread::sleep(std::time::Duration::from_millis(150));
+    }
 }
 
 fn spawn_detached_daemon() -> Result<(), Box<dyn std::error::Error>> {
@@ -37,6 +101,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if args.len() > 1 {
         match args[1].as_str() {
+            "inspect" | "context" | "test-context" => {
+                return run_inspector();
+            }
             "kill" | "stop" => {
                 if winpie::ipc::signal_kill() {
                     println!("[WinPie] Successfully stopped running WinPie process.");

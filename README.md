@@ -55,6 +55,7 @@ USAGE:
   winpie kill                  Stop the running WinPie process
   winpie reload                Restart / reload WinPie with updated config
   winpie status                Check if WinPie is currently running
+  winpie inspect               Live stream active window context & profile matching
   winpie autostart enable      Launch WinPie automatically on Windows login
   winpie autostart disable     Remove WinPie from Windows startup
   winpie autostart status      Check Windows startup shortcut status
@@ -371,7 +372,7 @@ Run the full automated test suite:
 cargo test --all-targets
 ```
 
-All 35 unit and integration tests verify:
+All 36 unit and integration tests verify:
 - 8-way angular classification and rotation offsets
 - Multi-monitor negative virtual screen coordinate roundtrips
 - Deadzone and outer radius Euclidean boundaries
