@@ -26,7 +26,9 @@ This document serves as the operational guide and invariant reference for autono
 ### 1.4 Input Swallowing vs. System Input Leakage
 - **The Pitfall**: Greedily returning `LRESULT(1)` for unhandled keys or mouse events traps OS input and can lock the user out of Windows without <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Del</kbd>.
 - **The Rule**:
-  - In `ll_mouse_proc`: **NEVER swallow `WM_LBUTTONUP` or `WM_RBUTTONUP`**. Only swallow `WM_LBUTTONDOWN` and `WM_RBUTTONDOWN` when `IS_ACTIVE` or `IS_MODAL_MENU` are active.
+  - In `ll_mouse_proc`: **NEVER swallow button-downs when idle, and NEVER swallow `WM_LBUTTONUP` under any circumstance** (an orphaned left-up is harmless; swallowing it could break drag-release gestures that began before activation). Only swallow `WM_LBUTTONDOWN` and `WM_RBUTTONDOWN` when `IS_ACTIVE` or `IS_MODAL_MENU` are active.
+- **Right-click pairing rule**: whenever `WM_RBUTTONDOWN` is swallowed, its matching `WM_RBUTTONUP` MUST also be swallowed (tracked via the `SWALLOW_RMB_UP` flag), and any `WM_RBUTTONUP` arriving while `IS_ACTIVE` / `IS_MODAL_MENU` is live must be swallowed too. Rationale: `WM_CONTEXTMENU` is NOT delivered through `WH_MOUSE_LL`; the background window's `DefWindowProc` generates it when it processes `WM_RBUTTONUP`. So an orphaned right-button-up surviving our swallowed DOWN leaks a context menu into the app behind the overlay — the exact "right-click cancel still goes through" bug.
+- **Right-click pairing must run OUTSIDE the active gate**: the `WM_RBUTTONUP` swallow check MUST NOT be nested inside `if IS_ACTIVE || IS_MODAL_MENU`. The `WM_RBUTTONDOWN` handler clears both flags in the same callback that swallows the down, so by the time the physical UP arrives those flags are already `false` and a gated check is dead code — the orphaned up then passes through `CallNextHookEx` and the bug returns. Evaluate `SWALLOW_RMB_UP` unconditionally at the top of `ll_mouse_proc` (see `should_swallow_rbutton_up`).
   - In `ll_keyboard_proc`: In modal submenus, only swallow alphanumeric shortcut keys (<kbd>A</kbd>-<kbd>Z</kbd>, <kbd>0</kbd>-<kbd>9</kbd>), <kbd>Tab</kbd>, and <kbd>Esc</kbd>. Pass through all other keys (modifiers, arrows, Enter, function keys) via `CallNextHookEx`.
 
 ### 1.5 Windows Start Menu Disarming via Mask Key `0xE8`
@@ -72,4 +74,5 @@ When modifying input hooks, FSM transitions, or overlay logic:
    - Verify <kbd>Win</kbd> + <kbd>Esc</kbd> opens radial menu repeatedly.
    - Verify <kbd>Win</kbd>-up commit and left-click commit.
    - Verify Right-Click dismisses cleanly without autorepeat re-opening while keys are held.
+- Verify right-click cancel does NOT open a context menu in the application behind the overlay (and that a normal idle right-click still does).
    - Verify `winpie inspect` streams active window context in real time.

@@ -18,6 +18,13 @@ pub static LAST_POSTED_Y: AtomicI32 = AtomicI32::new(i32::MIN);
 // WAIT_RELEASE state: WinPie will NOT re-activate until keys are released and pressed again.
 pub static REQUIRE_KEY_RELEASE: AtomicBool = AtomicBool::new(false);
 
+// Set when the hook swallows a WM_RBUTTONDOWN; consumed (and cleared) by the matching
+// WM_RBUTTONUP, which must ALSO be swallowed so the background app never receives an
+// orphaned right-button-up (its DefWindowProc would turn it into WM_CONTEXTMENU).
+// Persists past the DOWN because IS_ACTIVE / IS_MODAL_MENU are cleared inside the same
+// callback, so by the time the physical UP arrives the "active" guards are already false.
+pub static SWALLOW_RMB_UP: AtomicBool = AtomicBool::new(false);
+
 pub fn is_win_down() -> bool {
     LEFT_WIN_DOWN.load(Ordering::SeqCst) || RIGHT_WIN_DOWN.load(Ordering::SeqCst)
 }
