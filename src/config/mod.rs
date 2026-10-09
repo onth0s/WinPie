@@ -37,6 +37,98 @@ pub struct MenuDefinition {
     pub items: HashMap<char, MenuItem>,
 }
 
+/// Canonical unified CommandNode for arbitrary-depth hierarchical command graph topologies (Phase 6 / 8).
+/// Every node possesses the identical shape:
+/// - `is_executable()`: true if `command` is non-empty.
+/// - `is_branching()`: true if `children` is non-empty.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Default)]
+pub struct CommandNode {
+    pub label: String,
+    #[serde(default)]
+    pub tooltip: Option<String>,
+    #[serde(default)]
+    pub icon: Option<String>,
+    #[serde(default)]
+    pub command: Option<String>,
+    #[serde(default)]
+    pub children: HashMap<char, CommandNode>,
+}
+
+impl CommandNode {
+    pub fn new(label: impl Into<String>) -> Self {
+        Self {
+            label: label.into(),
+            ..Default::default()
+        }
+    }
+
+    pub fn with_tooltip(mut self, tooltip: impl Into<String>) -> Self {
+        self.tooltip = Some(tooltip.into());
+        self
+    }
+
+    pub fn with_command(mut self, cmd: impl Into<String>) -> Self {
+        self.command = Some(cmd.into());
+        self
+    }
+
+    pub fn with_child(mut self, key: char, child: CommandNode) -> Self {
+        self.children.insert(key, child);
+        self
+    }
+
+    pub fn is_executable(&self) -> bool {
+        self.command.as_ref().map(|c| !c.trim().is_empty()).unwrap_or(false)
+    }
+
+    pub fn is_branching(&self) -> bool {
+        !self.children.is_empty()
+    }
+}
+
+impl From<&MenuItem> for CommandNode {
+    fn from(item: &MenuItem) -> Self {
+        let mut node = CommandNode {
+            label: item.label.clone(),
+            tooltip: item.tooltip.clone(),
+            icon: None,
+            command: item.command.clone(),
+            children: HashMap::new(),
+        };
+        if let Some(ref m) = item.menu {
+            for (&k, child_item) in &m.items {
+                node.children.insert(k, CommandNode::from(child_item));
+            }
+        }
+        node
+    }
+}
+
+impl From<&CommandNode> for MenuItem {
+    fn from(node: &CommandNode) -> Self {
+        let menu = if !node.children.is_empty() {
+            let mut items = HashMap::new();
+            for (&k, child) in &node.children {
+                items.insert(k, MenuItem::from(child));
+            }
+            Some(MenuDefinition {
+                title: node.label.clone(),
+                tooltip: node.tooltip.clone(),
+                items,
+            })
+        } else {
+            None
+        };
+
+        MenuItem {
+            label: node.label.clone(),
+            tooltip: node.tooltip.clone(),
+            command: node.command.clone(),
+            menu,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq, Default)]
 pub struct ContextMatcher {
     #[serde(default)]
@@ -45,15 +137,61 @@ pub struct ContextMatcher {
     pub window_class: Option<String>,
     #[serde(default)]
     pub window_title: Option<String>,
+    #[serde(default)]
+    pub window_title_contains: Option<String>,
+    #[serde(default)]
+    pub clipboard_has_text: Option<bool>,
+    #[serde(default)]
+    pub clipboard_has_files: Option<bool>,
 }
 
 impl ContextMatcher {
+    /// Specificity ranking score for resolving highest-priority profile (Phase 7).
+    pub fn specificity_score(&self) -> u32 {
+        let mut score = 0;
+        if self.process.is_some() { score += 10; }
+        if self.window_class.is_some() { score += 10; }
+        if self.window_title.is_some() { score += 20; }
+        if self.window_title_contains.is_some() { score += 15; }
+        if self.clipboard_has_text.is_some() { score += 5; }
+        if self.clipboard_has_files.is_some() { score += 5; }
+        score
+    }
+
+    /// Matches against full InvocationContext.
+    pub fn matches_invocation(&self, inv: &crate::context::InvocationContext) -> bool {
+        let ctx = crate::context::WindowContext::from(inv);
+        if !self.matches(&ctx) {
+            return false;
+        }
+
+        if let Some(want_text) = self.clipboard_has_text {
+            if inv.clipboard.has_text != want_text {
+                return false;
+            }
+        }
+
+        if let Some(want_files) = self.clipboard_has_files {
+            if inv.clipboard.has_files != want_files {
+                return false;
+            }
+        }
+
+        true
+    }
+
     /// Returns true if the window context matches all specified non-empty criteria.
     pub fn matches(&self, ctx: &crate::context::WindowContext) -> bool {
         if let Some(target_proc) = &self.process {
             if !target_proc.is_empty() {
                 let p_clean = target_proc.trim().to_lowercase();
-                if ctx.process_name != p_clean && !ctx.process_name.contains(&p_clean) {
+                let actual = ctx.process_name.trim().to_lowercase();
+                let matches_proc = if p_clean.ends_with(".exe") {
+                    actual == p_clean || actual.ends_with(&format!("\\{}", p_clean))
+                } else {
+                    actual == p_clean || actual == format!("{}.exe", p_clean) || actual.contains(&p_clean)
+                };
+                if !matches_proc {
                     return false;
                 }
             }
@@ -74,8 +212,22 @@ impl ContextMatcher {
             }
         }
 
-        // If at least one criteria was defined and matched
-        self.process.is_some() || self.window_class.is_some() || self.window_title.is_some()
+        if let Some(contains_str) = &self.window_title_contains {
+            if !contains_str.is_empty() {
+                let c_clean = contains_str.to_lowercase();
+                if !ctx.window_title.to_lowercase().contains(&c_clean) {
+                    return false;
+                }
+            }
+        }
+
+        // If at least one criteria was defined
+        self.process.is_some()
+            || self.window_class.is_some()
+            || self.window_title.is_some()
+            || self.window_title_contains.is_some()
+            || self.clipboard_has_text.is_some()
+            || self.clipboard_has_files.is_some()
     }
 }
 
@@ -174,6 +326,8 @@ pub struct WheelConfig {
     pub commands: HashMap<String, String>,
     #[serde(default)]
     pub menus: HashMap<String, MenuDefinition>,
+    #[serde(default)]
+    pub nodes: HashMap<String, CommandNode>,
 }
 
 impl Default for WheelConfig {
@@ -185,6 +339,7 @@ impl Default for WheelConfig {
             tooltips: HashMap::new(),
             commands: HashMap::new(),
             menus: HashMap::new(),
+            nodes: HashMap::new(),
         }
     }
 }
@@ -545,14 +700,44 @@ impl AppConfig {
         }
     }
 
-    /// Finds the index of the first profile matching the given WindowContext.
+    /// Finds the index of the best matching profile with highest specificity score.
     pub fn find_matching_profile(&self, ctx: &crate::context::WindowContext) -> Option<usize> {
+        let mut best: Option<(usize, u32)> = None;
         for (i, p) in self.profiles.iter().enumerate() {
             if p.match_rules.matches(ctx) {
-                return Some(i);
+                let score = p.match_rules.specificity_score();
+                match best {
+                    Some((_, best_score)) if score > best_score => {
+                        best = Some((i, score));
+                    }
+                    None => {
+                        best = Some((i, score));
+                    }
+                    _ => {}
+                }
             }
         }
-        None
+        best.map(|(idx, _)| idx)
+    }
+
+    /// Finds the best matching profile evaluated against the frozen InvocationContext.
+    pub fn find_matching_profile_for_invocation(&self, inv: &crate::context::InvocationContext) -> Option<usize> {
+        let mut best: Option<(usize, u32)> = None;
+        for (i, p) in self.profiles.iter().enumerate() {
+            if p.match_rules.matches_invocation(inv) {
+                let score = p.match_rules.specificity_score();
+                match best {
+                    Some((_, best_score)) if score > best_score => {
+                        best = Some((i, score));
+                    }
+                    None => {
+                        best = Some((i, score));
+                    }
+                    _ => {}
+                }
+            }
+        }
+        best.map(|(idx, _)| idx)
     }
 
     pub fn get_label_for_sector(&self, sector: Sector) -> &str {
@@ -642,5 +827,74 @@ impl AppConfig {
             }
         }
         &self.theme
+    }
+
+    pub fn get_node_for_sector(&self, sector: Sector) -> Option<CommandNode> {
+        self.get_node_for_sector_with_profile(sector, None)
+    }
+
+    pub fn get_node_for_sector_with_profile(&self, sector: Sector, profile_idx: Option<usize>) -> Option<CommandNode> {
+        let sector_name = sector.name();
+        if let Some(idx) = profile_idx {
+            if let Some(profile) = self.profiles.get(idx) {
+                if let Some(node) = profile.wheel.nodes.get(sector_name) {
+                    return Some(node.clone());
+                }
+                if let Some(menu) = profile.wheel.menus.get(sector_name) {
+                    let mut items = HashMap::new();
+                    for (&k, item) in &menu.items {
+                        items.insert(k, CommandNode::from(item));
+                    }
+                    return Some(CommandNode {
+                        label: menu.title.clone(),
+                        tooltip: menu.tooltip.clone(),
+                        icon: None,
+                        command: None,
+                        children: items,
+                    });
+                }
+                if let Some(cmd) = profile.wheel.commands.get(sector_name) {
+                    let label = profile.wheel.labels.get(sector_name).cloned().unwrap_or_else(|| sector_name.to_string());
+                    let tooltip = profile.wheel.tooltips.get(sector_name).cloned();
+                    return Some(CommandNode {
+                        label,
+                        tooltip,
+                        icon: None,
+                        command: Some(cmd.clone()),
+                        children: HashMap::new(),
+                    });
+                }
+            }
+        }
+
+        if let Some(node) = self.wheel.nodes.get(sector_name) {
+            return Some(node.clone());
+        }
+        if let Some(menu) = self.wheel.menus.get(sector_name) {
+            let mut items = HashMap::new();
+            for (&k, item) in &menu.items {
+                items.insert(k, CommandNode::from(item));
+            }
+            return Some(CommandNode {
+                label: menu.title.clone(),
+                tooltip: menu.tooltip.clone(),
+                icon: None,
+                command: None,
+                children: items,
+            });
+        }
+        if let Some(cmd) = self.wheel.commands.get(sector_name) {
+            let label = self.wheel.labels.get(sector_name).cloned().unwrap_or_else(|| sector_name.to_string());
+            let tooltip = self.wheel.tooltips.get(sector_name).cloned();
+            return Some(CommandNode {
+                label,
+                tooltip,
+                icon: None,
+                command: Some(cmd.clone()),
+                children: HashMap::new(),
+            });
+        }
+
+        None
     }
 }

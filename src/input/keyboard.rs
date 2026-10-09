@@ -34,15 +34,27 @@ pub unsafe extern "system" fn ll_keyboard_proc(
         let is_down = msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN;
         let is_up = msg == WM_KEYUP || msg == WM_SYSKEYUP;
 
-        // Track Windows modifier keys
-        if vk == VK_LWIN {
-            LEFT_WIN_DOWN.store(is_down, Ordering::SeqCst);
-        } else if vk == VK_RWIN {
-            RIGHT_WIN_DOWN.store(is_down, Ordering::SeqCst);
-        } else if vk == VK_ESCAPE {
-            ESCAPE_DOWN.store(is_down, Ordering::SeqCst);
-        } else if vk == VK_SHIFT || vk == VK_LSHIFT || vk == VK_RSHIFT {
-            SHIFT_DOWN.store(is_down, Ordering::SeqCst);
+        // Track Windows modifier keys strictly on down/up transitions
+        if is_down {
+            if vk == VK_LWIN {
+                LEFT_WIN_DOWN.store(true, Ordering::SeqCst);
+            } else if vk == VK_RWIN {
+                RIGHT_WIN_DOWN.store(true, Ordering::SeqCst);
+            } else if vk == VK_ESCAPE {
+                ESCAPE_DOWN.store(true, Ordering::SeqCst);
+            } else if vk == VK_SHIFT || vk == VK_LSHIFT || vk == VK_RSHIFT {
+                SHIFT_DOWN.store(true, Ordering::SeqCst);
+            }
+        } else if is_up {
+            if vk == VK_LWIN {
+                LEFT_WIN_DOWN.store(false, Ordering::SeqCst);
+            } else if vk == VK_RWIN {
+                RIGHT_WIN_DOWN.store(false, Ordering::SeqCst);
+            } else if vk == VK_ESCAPE {
+                ESCAPE_DOWN.store(false, Ordering::SeqCst);
+            } else if vk == VK_SHIFT || vk == VK_LSHIFT || vk == VK_RSHIFT {
+                SHIFT_DOWN.store(false, Ordering::SeqCst);
+            }
         }
 
         let win_held = is_win_down();

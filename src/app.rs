@@ -8,7 +8,7 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 
 use crate::config::AppConfig;
 use crate::diagnostics::Diagnostics;
-use crate::executor::execute_command;
+use crate::executor::execute_command_with_context;
 use crate::geometry::{GeometryConfig, Point, Sector};
 use crate::input::{
     InputManager, WM_WINPIE_ACTIVATE, WM_WINPIE_ALLKEYSUP, WM_WINPIE_LBUTTONDOWN,
@@ -42,6 +42,7 @@ pub struct Application {
     _control_window: crate::ipc::ControlWindow,
     input_manager: InputManager,
     active_profile: Option<usize>,
+    active_invocation: Option<crate::context::InvocationContext>,
 }
 
 impl Application {
@@ -88,6 +89,7 @@ impl Application {
             _control_window: control_window,
             input_manager,
             active_profile: None,
+            active_invocation: None,
         })
     }
 
@@ -179,10 +181,11 @@ impl Application {
     }
 
     fn handle_activate(&mut self, anchor: Point) {
-        // Detect foreground window context
-        let ctx = crate::context::active_window_context();
-        let profile_idx = self.config.find_matching_profile(&ctx);
+        // Capture frozen InvocationContext snapshot atomically once at invocation trigger (INV-CTX-001)
+        let inv = crate::context::capture_invocation_context(anchor);
+        let profile_idx = self.config.find_matching_profile_for_invocation(&inv);
         self.active_profile = profile_idx;
+        self.active_invocation = Some(inv);
 
         let effect = self.fsm.transition(InteractionEvent::WinEscDown(anchor));
         if let InteractionEffect::Activated { anchor } = effect {
@@ -274,7 +277,7 @@ impl Application {
         self.toast.show(anchor, &text, &self.config.toast, theme);
 
         if let Some(cmd) = self.config.get_command_for_sector_with_profile(sector, profile_idx) {
-            match execute_command(cmd) {
+            match execute_command_with_context(cmd, self.active_invocation.as_ref()) {
                 Ok(_) => println!("[WinPie:ACTION] Executed: {}", cmd),
                 Err(e) => eprintln!("[WinPie:ACTION ERROR] Failed to execute '{}': {}", cmd, e),
             }
@@ -300,7 +303,7 @@ impl Application {
                             let text = format!("Executed: {}", label);
                             self.toast.show(anchor, &text, &self.config.toast, theme);
 
-                            match execute_command(&command) {
+                            match execute_command_with_context(&command, self.active_invocation.as_ref()) {
                                 Ok(_) => println!("[WinPie:ACTION] Executed: {}", command),
                                 Err(e) => eprintln!("[WinPie:ACTION ERROR] Failed to execute '{}': {}", command, e),
                             }
@@ -403,7 +406,7 @@ impl Application {
                 let text = format!("Executed: {}", label);
                 self.toast.show(anchor, &text, &self.config.toast, theme);
 
-                match execute_command(&command) {
+                match execute_command_with_context(&command, self.active_invocation.as_ref()) {
                     Ok(_) => println!("[WinPie:ACTION] Executed: {}", command),
                     Err(e) => eprintln!("[WinPie:ACTION ERROR] Failed to execute '{}': {}", command, e),
                 }

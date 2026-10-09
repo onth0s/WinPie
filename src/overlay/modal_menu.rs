@@ -6,7 +6,7 @@ use windows::Win32::Graphics::Gdi::{
     DrawTextW, FillRect, GetDC, GetMonitorInfoW, MonitorFromPoint, ReleaseDC, SelectObject,
     SetBkMode, SetTextColor, AC_SRC_ALPHA, BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BLENDFUNCTION,
     CLEARTYPE_QUALITY, DIB_RGB_COLORS, DT_NOPREFIX, DT_SINGLELINE, DT_VCENTER,
-    HBRUSH, MONITORINFO, MONITOR_DEFAULTTONEAREST, TRANSPARENT,
+    HBRUSH, HFONT, MONITORINFO, MONITOR_DEFAULTTONEAREST, TRANSPARENT,
 };
 use windows::Win32::UI::WindowsAndMessaging::*;
 
@@ -15,6 +15,9 @@ use crate::geometry::Point;
 
 pub struct ModalMenuOverlay {
     hwnd: HWND,
+    title_font: HFONT,
+    item_font: HFONT,
+    badge_font: HFONT,
 }
 
 impl ModalMenuOverlay {
@@ -57,7 +60,68 @@ impl ModalMenuOverlay {
                 None,
             )?;
 
-            Ok(Self { hwnd })
+            let family_wide: Vec<u16> = OsStr::new("Segoe UI")
+                .encode_wide()
+                .chain(std::iter::once(0))
+                .collect();
+
+            let title_font = CreateFontW(
+                -13,
+                0,
+                0,
+                0,
+                700, // Bold
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                CLEARTYPE_QUALITY.0 as u32,
+                0,
+                windows::core::PCWSTR(family_wide.as_ptr()),
+            );
+
+            let item_font = CreateFontW(
+                -13,
+                0,
+                0,
+                0,
+                600, // Semibold
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                CLEARTYPE_QUALITY.0 as u32,
+                0,
+                windows::core::PCWSTR(family_wide.as_ptr()),
+            );
+
+            let badge_font = CreateFontW(
+                -12,
+                0,
+                0,
+                0,
+                700, // Bold
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                CLEARTYPE_QUALITY.0 as u32,
+                0,
+                windows::core::PCWSTR(family_wide.as_ptr()),
+            );
+
+            Ok(Self {
+                hwnd,
+                title_font,
+                item_font,
+                badge_font,
+            })
         }
     }
 
@@ -258,61 +322,9 @@ impl ModalMenuOverlay {
                 if let Ok(m_bmp) = mask_bmp {
                     let m_old_bmp = SelectObject(mask_dc, m_bmp);
 
-                    let family_wide: Vec<u16> = OsStr::new("Segoe UI")
-                        .encode_wide()
-                        .chain(std::iter::once(0))
-                        .collect();
-
-                    let title_font = CreateFontW(
-                        -13,
-                        0,
-                        0,
-                        0,
-                        700, // Bold
-                        0,
-                        0,
-                        0,
-                        0,
-                        0,
-                        0,
-                        CLEARTYPE_QUALITY.0 as u32,
-                        0,
-                        windows::core::PCWSTR(family_wide.as_ptr()),
-                    );
-
-                    let item_font = CreateFontW(
-                        -13,
-                        0,
-                        0,
-                        0,
-                        600, // Semibold
-                        0,
-                        0,
-                        0,
-                        0,
-                        0,
-                        0,
-                        CLEARTYPE_QUALITY.0 as u32,
-                        0,
-                        windows::core::PCWSTR(family_wide.as_ptr()),
-                    );
-
-                    let badge_font = CreateFontW(
-                        -12,
-                        0,
-                        0,
-                        0,
-                        700, // Bold
-                        0,
-                        0,
-                        0,
-                        0,
-                        0,
-                        0,
-                        CLEARTYPE_QUALITY.0 as u32,
-                        0,
-                        windows::core::PCWSTR(family_wide.as_ptr()),
-                    );
+                    let title_font = self.title_font;
+                    let item_font = self.item_font;
+                    let badge_font = self.badge_font;
 
                     let black_brush = CreateSolidBrush(COLORREF(0));
                     let full_rc = RECT { left: 0, top: 0, right: card_w, bottom: card_h };
@@ -414,9 +426,6 @@ impl ModalMenuOverlay {
 
                     let _ = DeleteObject(black_brush);
                     SelectObject(mask_dc, old_f);
-                    let _ = DeleteObject(title_font);
-                    let _ = DeleteObject(item_font);
-                    let _ = DeleteObject(badge_font);
                     SelectObject(mask_dc, m_old_bmp);
                     let _ = DeleteObject(m_bmp);
                 }
@@ -595,6 +604,15 @@ fn composite_text_rect(
 impl Drop for ModalMenuOverlay {
     fn drop(&mut self) {
         unsafe {
+            if !self.title_font.0.is_null() {
+                let _ = DeleteObject(self.title_font);
+            }
+            if !self.item_font.0.is_null() {
+                let _ = DeleteObject(self.item_font);
+            }
+            if !self.badge_font.0.is_null() {
+                let _ = DeleteObject(self.badge_font);
+            }
             if !self.hwnd.0.is_null() {
                 let _ = DestroyWindow(self.hwnd);
             }

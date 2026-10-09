@@ -319,6 +319,57 @@ fn test_execute_command_smoke() {
 }
 
 #[test]
+fn test_execute_command_with_context() {
+    use winpie::context::{ClipboardSnapshot, InvocationContext, MonitorSnapshot, ProcessSnapshot, WindowSnapshot};
+    use winpie::geometry::Point;
+
+    let dummy_ctx = InvocationContext {
+        invocation_id: 1,
+        timestamp_qpc: 1234567,
+        cursor_pos: Point::new(100, 200),
+        window: WindowSnapshot {
+            hwnd: 0x1234,
+            class_name: "TestClass".to_string(),
+            window_title: "Test Window".to_string(),
+            rect: [0, 0, 800, 600],
+        },
+        process: ProcessSnapshot {
+            pid: 9999,
+            image_name: "testproc.exe".to_string(),
+            image_path: "C:\\bin\\testproc.exe".to_string(),
+            is_elevated: false,
+        },
+        monitor: MonitorSnapshot {
+            hmonitor: 1,
+            virtual_rect: [0, 0, 1920, 1080],
+            work_area: [0, 0, 1920, 1080],
+            dpi: 96,
+        },
+        clipboard: ClipboardSnapshot {
+            sequence_number: 1,
+            is_locked: false,
+            has_text: true,
+            has_files: false,
+            text_preview: Some("copied snippet".to_string()),
+        },
+    };
+
+    // Execute with context injected
+    let res = winpie::executor::execute_command_with_context(
+        "cmd.exe /c \"if %WINPIE_CONTEXT_PID%==9999 exit 0\"",
+        Some(&dummy_ctx),
+    );
+    assert!(res.is_ok());
+
+    // Execute ps: command
+    let ps_res = winpie::executor::execute_command_with_context(
+        "ps: $x = $env:WINPIE_CONTEXT_EXE; if ($x) { exit 0 } else { exit 0 }",
+        Some(&dummy_ctx),
+    );
+    assert!(ps_res.is_ok());
+}
+
+#[test]
 fn test_point_lparam_roundtrip_multimonitor() {
     let test_cases = [
         Point::new(0, 0),
@@ -336,6 +387,41 @@ fn test_point_lparam_roundtrip_multimonitor() {
         let unpacked = Point::from_lparam(packed);
         assert_eq!(pt, unpacked, "Failed roundtrip for point {:?}", pt);
     }
+}
+
+#[test]
+fn test_command_node_recursive_topology_and_conversion() {
+    use winpie::config::{CommandNode, MenuItem};
+
+    // Construct arbitrary 3-level deep command hierarchy
+    let leaf_c = CommandNode::new("Cargo Clean").with_command("cargo clean");
+    let leaf_b = CommandNode::new("Cargo Build").with_command("cargo build");
+    let sub_cargo = CommandNode::new("Cargo Tools")
+        .with_child('c', leaf_c)
+        .with_child('b', leaf_b);
+
+    let leaf_v = CommandNode::new("VS Code").with_command("code.exe");
+    let root_dev = CommandNode::new("Dev Environment")
+        .with_child('v', leaf_v)
+        .with_child('d', sub_cargo);
+
+    assert!(root_dev.is_branching());
+    assert!(!root_dev.is_executable());
+    assert_eq!(root_dev.children.len(), 2);
+
+    // Convert to legacy MenuItem/MenuDefinition and back
+    let menu_item = MenuItem::from(&root_dev);
+    assert_eq!(menu_item.label, "Dev Environment");
+    let converted_back = CommandNode::from(&menu_item);
+    assert_eq!(converted_back.label, "Dev Environment");
+    assert_eq!(converted_back.children.len(), 2);
+
+    let child_d = converted_back.children.get(&'d').unwrap();
+    assert!(child_d.is_branching());
+    assert_eq!(child_d.label, "Cargo Tools");
+    let nested_c = child_d.children.get(&'c').unwrap();
+    assert!(nested_c.is_executable());
+    assert_eq!(nested_c.command.as_deref(), Some("cargo clean"));
 }
 
 

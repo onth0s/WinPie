@@ -1,13 +1,26 @@
 states:
   - IDLE
   - ACTIVE
+  - MODAL_MENU
   - WAIT_RELEASE
 
 transitions:
+  # Activation from Idle or WaitRelease
   - from: IDLE
     event: WIN_ESC_DOWN
     to: ACTIVE
     effect: ACTIVATE
+
+  - from: WAIT_RELEASE
+    event: WIN_ESC_DOWN
+    to: ACTIVE
+    effect: ACTIVATE
+
+  # Radial wheel transitions
+  - from: ACTIVE
+    event: MOUSE_MOVE
+    to: ACTIVE
+    effect: HOVER_CHANGED_OR_NONE
 
   - from: ACTIVE
     event: LBUTTON_DOWN
@@ -29,6 +42,53 @@ transitions:
     to: IDLE
     effect: CANCEL
 
+  # Modal submenu transitions
+  - from: ACTIVE
+    event: MENU_SPAWN
+    to: MODAL_MENU
+    effect: MENU_SPAWNED
+
+  - from: MODAL_MENU
+    event: MENU_KEYDOWN
+    to: MODAL_MENU
+    effect: MENU_HIGHLIGHT_CHANGED
+
+  - from: MODAL_MENU
+    event: MENU_HOVER
+    to: MODAL_MENU
+    effect: MENU_HIGHLIGHT_CHANGED
+
+  - from: MODAL_MENU
+    event: MENU_KEYUP
+    to: MODAL_MENU_OR_IDLE_OR_WAIT_RELEASE
+    effect: MENU_DRILL_DOWN_OR_EXECUTED
+
+  - from: MODAL_MENU
+    event: MENU_SELECT
+    to: MODAL_MENU_OR_IDLE_OR_WAIT_RELEASE
+    effect: MENU_DRILL_DOWN_OR_EXECUTED
+
+  - from: MODAL_MENU
+    event: MENU_TAB
+    to: MODAL_MENU
+    effect: MENU_BACKTRACK_OR_RESET_TO_ROOT
+
+  - from: MODAL_MENU
+    event: MENU_ESC
+    to: IDLE_OR_WAIT_RELEASE
+    effect: CANCEL
+
+  - from: MODAL_MENU
+    event: RBUTTON_DOWN
+    to: IDLE_OR_WAIT_RELEASE
+    effect: CANCEL
+
+  - from: MODAL_MENU
+    event: FATAL_ERROR
+    to: IDLE
+    effect: CANCEL
+
+  # Key release re-arm
   - from: WAIT_RELEASE
     event: ALL_KEYS_UP
     to: IDLE

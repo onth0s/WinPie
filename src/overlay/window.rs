@@ -1,8 +1,8 @@
 use windows::Win32::Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, POINT, SIZE, WPARAM};
 use windows::Win32::Graphics::Gdi::{
-    CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, GetDC, ReleaseDC,
-    SelectObject, AC_SRC_ALPHA, BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BLENDFUNCTION,
-    DIB_RGB_COLORS, HBRUSH,
+    CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, GetDC, GetMonitorInfoW,
+    MonitorFromPoint, ReleaseDC, SelectObject, AC_SRC_ALPHA, BI_RGB, BITMAPINFO, BITMAPINFOHEADER,
+    BLENDFUNCTION, DIB_RGB_COLORS, HBITMAP, HBRUSH, HDC, MONITORINFO, MONITOR_DEFAULTTONEAREST,
 };
 use windows::Win32::UI::WindowsAndMessaging::*;
 
@@ -13,6 +13,9 @@ use crate::overlay::render::generate_precomputed_buffers;
 pub struct OverlayWindow {
     hwnd: HWND,
     size: i32,
+    mem_dc: HDC,
+    bitmap: HBITMAP,
+    bits_ptr: *mut u32,
     default_buffers: [Vec<u32>; 9], // 0 = None (deadzone/unhovered), 1..=8 = Sector::from_index(i-1)
     profile_buffers: Vec<[Vec<u32>; 9]>, // Indexed by profile_idx
     active_profile_idx: std::cell::Cell<Option<usize>>,
@@ -63,6 +66,32 @@ impl OverlayWindow {
                 None,
             )?;
 
+            // Allocate persistent memory DC and DIBSection once at initialization (Zero-allocation hot-path)
+            let screen_dc = GetDC(None);
+            let mem_dc = CreateCompatibleDC(screen_dc);
+
+            let mut bmi: BITMAPINFO = std::mem::zeroed();
+            bmi.bmiHeader.biSize = std::mem::size_of::<BITMAPINFOHEADER>() as u32;
+            bmi.bmiHeader.biWidth = size;
+            bmi.bmiHeader.biHeight = -size; // Top-down
+            bmi.bmiHeader.biPlanes = 1;
+            bmi.bmiHeader.biBitCount = 32;
+            bmi.bmiHeader.biCompression = BI_RGB.0;
+
+            let mut bits_raw: *mut std::ffi::c_void = std::ptr::null_mut();
+            let bitmap = CreateDIBSection(
+                mem_dc,
+                &bmi,
+                DIB_RGB_COLORS,
+                &mut bits_raw,
+                None,
+                0,
+            )?;
+
+            let _ = SelectObject(mem_dc, bitmap);
+            ReleaseDC(None, screen_dc);
+            let bits_ptr = bits_raw as *mut u32;
+
             // Precompute default buffer set (all 9 states)
             let default_buffers = generate_precomputed_buffers(
                 config,
@@ -90,6 +119,9 @@ impl OverlayWindow {
             Ok(Self {
                 hwnd,
                 size,
+                mem_dc,
+                bitmap,
+                bits_ptr,
                 default_buffers,
                 profile_buffers,
                 active_profile_idx: std::cell::Cell::new(None),
@@ -104,12 +136,35 @@ impl OverlayWindow {
     pub fn show_at(&self, center: Point, hover: Option<Sector>, profile_idx: Option<usize>) {
         self.active_profile_idx.set(profile_idx);
         let half = self.size / 2;
-        let left = center.x - half;
-        let top = center.y - half;
-
-        self.blit_hover(hover);
 
         unsafe {
+            // Clamp overlay placement within active physical monitor work area (taskbar/edge guard)
+            let pt = POINT { x: center.x, y: center.y };
+            let hmon = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
+            let mut mi = MONITORINFO {
+                cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+                ..Default::default()
+            };
+            let _ = GetMonitorInfoW(hmon, &mut mi);
+            let work = mi.rcWork;
+
+            let mut left = center.x - half;
+            let mut top = center.y - half;
+
+            if left < work.left {
+                left = work.left;
+            } else if left + self.size > work.right {
+                left = work.right - self.size;
+            }
+
+            if top < work.top {
+                top = work.top;
+            } else if top + self.size > work.bottom {
+                top = work.bottom - self.size;
+            }
+
+            self.blit_hover(hover);
+
             let _ = SetWindowPos(
                 self.hwnd,
                 HWND_TOPMOST,
@@ -151,66 +206,39 @@ impl OverlayWindow {
 
         unsafe {
             let screen_dc = GetDC(None);
-            let mem_dc = CreateCompatibleDC(screen_dc);
 
-            let mut bmi: BITMAPINFO = std::mem::zeroed();
-            bmi.bmiHeader.biSize = std::mem::size_of::<BITMAPINFOHEADER>() as u32;
-            bmi.bmiHeader.biWidth = self.size;
-            bmi.bmiHeader.biHeight = -self.size; // Top-down
-            bmi.bmiHeader.biPlanes = 1;
-            bmi.bmiHeader.biBitCount = 32;
-            bmi.bmiHeader.biCompression = BI_RGB.0;
-
-            let mut bits_ptr: *mut std::ffi::c_void = std::ptr::null_mut();
-            let bitmap = CreateDIBSection(
-                mem_dc,
-                &bmi,
-                DIB_RGB_COLORS,
-                &mut bits_ptr,
-                None,
-                0,
+            // Zero-allocation, sub-microsecond direct memory copy into persistent DIBSection
+            std::ptr::copy_nonoverlapping(
+                src_pixels.as_ptr(),
+                self.bits_ptr,
+                src_pixels.len(),
             );
 
-            if let Ok(bmp) = bitmap {
-                let old_bmp = SelectObject(mem_dc, bmp);
+            let blend = BLENDFUNCTION {
+                BlendOp: AC_SRC_ALPHA as u8,
+                BlendFlags: 0,
+                SourceConstantAlpha: 255,
+                AlphaFormat: AC_SRC_ALPHA as u8,
+            };
 
-                // Instant direct memory copy from precomputed buffer! (sub-microsecond)
-                std::ptr::copy_nonoverlapping(
-                    src_pixels.as_ptr(),
-                    bits_ptr as *mut u32,
-                    src_pixels.len(),
-                );
+            let pt_src = POINT { x: 0, y: 0 };
+            let sz = SIZE {
+                cx: self.size,
+                cy: self.size,
+            };
 
-                let blend = BLENDFUNCTION {
-                    BlendOp: AC_SRC_ALPHA as u8,
-                    BlendFlags: 0,
-                    SourceConstantAlpha: 255,
-                    AlphaFormat: AC_SRC_ALPHA as u8,
-                };
+            let _ = UpdateLayeredWindow(
+                self.hwnd,
+                screen_dc,
+                None,
+                Some(&sz),
+                self.mem_dc,
+                Some(&pt_src),
+                COLORREF(0),
+                Some(&blend),
+                ULW_ALPHA,
+            );
 
-                let pt_src = POINT { x: 0, y: 0 };
-                let sz = SIZE {
-                    cx: self.size,
-                    cy: self.size,
-                };
-
-                let _ = UpdateLayeredWindow(
-                    self.hwnd,
-                    screen_dc,
-                    None,
-                    Some(&sz),
-                    mem_dc,
-                    Some(&pt_src),
-                    COLORREF(0),
-                    Some(&blend),
-                    ULW_ALPHA,
-                );
-
-                let _ = SelectObject(mem_dc, old_bmp);
-                let _ = DeleteObject(bmp);
-            }
-
-            let _ = DeleteDC(mem_dc);
             ReleaseDC(None, screen_dc);
         }
     }
@@ -219,6 +247,12 @@ impl OverlayWindow {
 impl Drop for OverlayWindow {
     fn drop(&mut self) {
         unsafe {
+            if !self.bitmap.0.is_null() {
+                let _ = DeleteObject(self.bitmap);
+            }
+            if !self.mem_dc.0.is_null() {
+                let _ = DeleteDC(self.mem_dc);
+            }
             if !self.hwnd.0.is_null() {
                 let _ = DestroyWindow(self.hwnd);
             }

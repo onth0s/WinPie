@@ -7,7 +7,8 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 
 pub const CONTROL_WINDOW_CLASS: windows::core::PCWSTR = windows::core::w!("WinPieControlWindowClass");
 pub const CONTROL_WINDOW_TITLE: windows::core::PCWSTR = windows::core::w!("WinPie Control Window");
-pub const SINGLETON_MUTEX_NAME: windows::core::PCWSTR = windows::core::w!("Local\\WinPie_SingleInstance_Mutex");
+pub const SINGLETON_MUTEX_GLOBAL: windows::core::PCWSTR = windows::core::w!("Global\\WinPie_SingleInstance_Mutex");
+pub const SINGLETON_MUTEX_LOCAL: windows::core::PCWSTR = windows::core::w!("Local\\WinPie_SingleInstance_Mutex");
 
 pub const WM_WINPIE_CONTROL_KILL: u32 = WM_USER + 101;
 
@@ -106,11 +107,23 @@ pub fn is_running() -> bool {
 /// Acquires the singleton mutex. Returns `Some(HANDLE)` on success, or `None` if an instance already exists.
 pub fn try_acquire_singleton() -> Option<HANDLE> {
     unsafe {
-        let handle = CreateMutexW(None, true, SINGLETON_MUTEX_NAME).ok()?;
-        if GetLastError() == ERROR_ALREADY_EXISTS {
-            return None;
+        // Attempt Global mutex first (per AGENTS.md rule 1.6)
+        match CreateMutexW(None, true, SINGLETON_MUTEX_GLOBAL) {
+            Ok(handle) => {
+                if GetLastError() == ERROR_ALREADY_EXISTS {
+                    return None;
+                }
+                Some(handle)
+            }
+            Err(_) => {
+                // Fall back to Local namespace if Global creation fails (e.g. non-admin token without SeCreateGlobalPrivilege)
+                let handle = CreateMutexW(None, true, SINGLETON_MUTEX_LOCAL).ok()?;
+                if GetLastError() == ERROR_ALREADY_EXISTS {
+                    return None;
+                }
+                Some(handle)
+            }
         }
-        Some(handle)
     }
 }
 

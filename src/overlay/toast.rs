@@ -6,7 +6,7 @@ use windows::Win32::Graphics::Gdi::{
     DrawTextW, FillRect, GetDC, GetMonitorInfoW, MonitorFromPoint, ReleaseDC, SelectObject,
     SetBkMode, SetTextColor, AC_SRC_ALPHA, BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BLENDFUNCTION,
     CLEARTYPE_QUALITY, DIB_RGB_COLORS, DT_CALCRECT, DT_NOPREFIX, DT_SINGLELINE, DT_VCENTER,
-    HBRUSH, MONITORINFO, MONITOR_DEFAULTTONEAREST, TRANSPARENT,
+    HBRUSH, HFONT, MONITORINFO, MONITOR_DEFAULTTONEAREST, TRANSPARENT,
 };
 use windows::Win32::UI::WindowsAndMessaging::*;
 
@@ -17,6 +17,8 @@ const TOAST_TIMER_ID: usize = 9001;
 
 pub struct ToastOverlay {
     hwnd: HWND,
+    font_13: HFONT,
+    font_11: HFONT,
 }
 
 impl ToastOverlay {
@@ -59,7 +61,50 @@ impl ToastOverlay {
                 None,
             )?;
 
-            Ok(Self { hwnd })
+            let family_wide: Vec<u16> = OsStr::new("Segoe UI")
+                .encode_wide()
+                .chain(std::iter::once(0))
+                .collect();
+
+            let font_13 = CreateFontW(
+                -13,
+                0,
+                0,
+                0,
+                600, // Semibold
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                CLEARTYPE_QUALITY.0 as u32,
+                0,
+                windows::core::PCWSTR(family_wide.as_ptr()),
+            );
+
+            let font_11 = CreateFontW(
+                -11,
+                0,
+                0,
+                0,
+                600, // Semibold
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                CLEARTYPE_QUALITY.0 as u32,
+                0,
+                windows::core::PCWSTR(family_wide.as_ptr()),
+            );
+
+            Ok(Self {
+                hwnd,
+                font_13,
+                font_11,
+            })
         }
     }
 
@@ -150,28 +195,35 @@ impl ToastOverlay {
             let screen_dc = GetDC(None);
             let measure_dc = CreateCompatibleDC(screen_dc);
 
-            let font_height = -font_size.abs();
-            let family_wide: Vec<u16> = OsStr::new("Segoe UI")
-                .encode_wide()
-                .chain(std::iter::once(0))
-                .collect();
+            let (hfont, custom_font) = if font_size == 13 {
+                (self.font_13, false)
+            } else if font_size == 11 {
+                (self.font_11, false)
+            } else {
+                let font_height = -font_size.abs();
+                let family_wide: Vec<u16> = OsStr::new("Segoe UI")
+                    .encode_wide()
+                    .chain(std::iter::once(0))
+                    .collect();
 
-            let hfont = CreateFontW(
-                font_height,
-                0,
-                0,
-                0,
-                600, // Semibold
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                CLEARTYPE_QUALITY.0 as u32,
-                0,
-                windows::core::PCWSTR(family_wide.as_ptr()),
-            );
+                let hf = CreateFontW(
+                    font_height,
+                    0,
+                    0,
+                    0,
+                    600, // Semibold
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    CLEARTYPE_QUALITY.0 as u32,
+                    0,
+                    windows::core::PCWSTR(family_wide.as_ptr()),
+                );
+                (hf, true)
+            };
 
             let old_font = SelectObject(measure_dc, hfont);
 
@@ -460,7 +512,9 @@ impl ToastOverlay {
             }
 
             SelectObject(measure_dc, old_font);
-            let _ = DeleteObject(hfont);
+            if custom_font {
+                let _ = DeleteObject(hfont);
+            }
             let _ = DeleteDC(measure_dc);
             ReleaseDC(None, screen_dc);
         }
@@ -477,6 +531,12 @@ impl ToastOverlay {
 impl Drop for ToastOverlay {
     fn drop(&mut self) {
         unsafe {
+            if !self.font_13.0.is_null() {
+                let _ = DeleteObject(self.font_13);
+            }
+            if !self.font_11.0.is_null() {
+                let _ = DeleteObject(self.font_11);
+            }
             if !self.hwnd.0.is_null() {
                 let _ = KillTimer(self.hwnd, TOAST_TIMER_ID);
                 let _ = DestroyWindow(self.hwnd);

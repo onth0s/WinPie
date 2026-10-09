@@ -47,6 +47,21 @@ invariants:
       WinPie enters WAIT_RELEASE and remains disarmed until all activation keys
       have been released.
 
+  - id: INV-INPUT-008
+    category: input
+    severity: critical
+    statement: >
+      Whenever WM_RBUTTONDOWN is swallowed to dismiss a menu, its matching
+      WM_RBUTTONUP must be swallowed unconditionally even after the active flag
+      has been cleared to prevent context menu leakage.
+
+  - id: INV-INPUT-009
+    category: input
+    severity: critical
+    statement: >
+      The synthetic dummy virtual key 0xE8 injected to disarm the Windows Start Menu
+      must always pass through low-level keyboard hooks without consumption or recursion.
+
   - id: INV-STATE-001
     category: state
     severity: critical
@@ -73,6 +88,34 @@ invariants:
     statement: >
       Hover selection is preselection only and cannot independently resolve
       or terminate the interaction.
+
+  - id: INV-MENU-001
+    category: menu
+    severity: critical
+    statement: >
+      Spawning a modal submenu transitions the FSM from ACTIVE to MODAL_MENU
+      without focus change or window activation.
+
+  - id: INV-MENU-002
+    category: menu
+    severity: critical
+    statement: >
+      In MODAL_MENU, pressing an item key previews the selection; releasing the key
+      either drills down into a child menu or executes the action.
+
+  - id: INV-MENU-003
+    category: menu
+    severity: critical
+    statement: >
+      In MODAL_MENU, Tab resets navigation back to root menu; Shift+Tab backtracks
+      one level up the navigation stack.
+
+  - id: INV-MENU-004
+    category: menu
+    severity: critical
+    statement: >
+      In MODAL_MENU, Escape or Right-Click unconditionally cancels the submenu
+      and returns to IDLE or WAIT_RELEASE.
 
   - id: INV-GEOMETRY-001
     category: geometry
