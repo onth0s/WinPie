@@ -691,12 +691,79 @@ fn default_deadzone_bg_opacity() -> f64 { 0.51 }
 fn default_deadzone_border_color() -> String { "#F0F0F0".to_string() }
 fn default_deadzone_border_opacity() -> f64 { 0.86 }
 
+/// Discovers the path to the active configuration file in order of priority:
+/// 1. `config.yaml` in current working directory (CWD)
+/// 2. `config.yaml` located in the directory of the running executable
+/// 3. `config.example.yaml` in current working directory (CWD)
+/// 4. `config.example.yaml` located in the directory of the running executable
+pub fn discover_config_path() -> Option<std::path::PathBuf> {
+    // 1. CWD config.yaml
+    let cwd_config = std::path::Path::new("config.yaml");
+    if cwd_config.is_file() {
+        if let Ok(abs) = std::fs::canonicalize(cwd_config) {
+            return Some(abs);
+        }
+        return Some(cwd_config.to_path_buf());
+    }
+
+    // 2. Next to executable
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(parent) = exe_path.parent() {
+            let exe_dir_config = parent.join("config.yaml");
+            if exe_dir_config.is_file() {
+                return Some(exe_dir_config);
+            }
+        }
+    }
+
+    // 3. CWD config.example.yaml
+    let cwd_example = std::path::Path::new("config.example.yaml");
+    if cwd_example.is_file() {
+        if let Ok(abs) = std::fs::canonicalize(cwd_example) {
+            return Some(abs);
+        }
+        return Some(cwd_example.to_path_buf());
+    }
+
+    // 4. Next to executable config.example.yaml
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(parent) = exe_path.parent() {
+            let exe_dir_example = parent.join("config.example.yaml");
+            if exe_dir_example.is_file() {
+                return Some(exe_dir_example);
+            }
+        }
+    }
+
+    None
+}
+
 impl AppConfig {
+    /// Discovers config file path and loads it. Returns (AppConfig, Option<PathBuf>).
+    pub fn discover_and_load() -> (Self, Option<std::path::PathBuf>) {
+        if let Some(path) = discover_config_path() {
+            if let Ok(content) = fs::read_to_string(&path) {
+                match serde_yaml::from_str(&content) {
+                    Ok(cfg) => return (cfg, Some(path)),
+                    Err(e) => {
+                        eprintln!("[WinPie] Error parsing YAML from {}: {}", path.display(), e);
+                        return (Self::default(), Some(path));
+                    }
+                }
+            }
+        }
+        (Self::default(), None)
+    }
+
     pub fn load_or_default(path: impl AsRef<Path>) -> Self {
-        if let Ok(content) = fs::read_to_string(path) {
+        let p = path.as_ref();
+        if p.as_os_str().is_empty() {
+            return Self::discover_and_load().0;
+        }
+        if let Ok(content) = fs::read_to_string(p) {
             serde_yaml::from_str(&content).unwrap_or_default()
         } else {
-            Self::default()
+            Self::discover_and_load().0
         }
     }
 

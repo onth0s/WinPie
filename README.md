@@ -41,7 +41,11 @@ WinPie provides global, focus-preserving radial menu invocation anchored to the 
   - Run `winpie inspect` in any terminal to live-stream active window detection (Executable, Path, Window Class, Title), matched profile rules, and active sector overrides as you switch focus between applications.
 - **Command-Line Lifecycle & Single-Instance Daemon**:
   - `winpie` operates both as a background daemon (with single-instance Mutex protection) and as a CLI control tool (`winpie kill`, `winpie reload`, `winpie status`, `winpie inspect`, `winpie autostart`).
-- **Automated PATH Linking & Windows Startup**:
+- **Zero-Latency Dynamic Hot-Reloading**:
+  - Automatically monitors `config.yaml` file modification timestamps upon activation (<kbd>Win</kbd> + <kbd>Esc</kbd>).
+  - Editing keybindings, colors, commands, or profiles takes effect instantly in real-time. No rebuild or manual daemon restart is required.
+- **Automated Daemon Startup & PATH Linking**:
+  - `build.ps1` compiles and immediately launches the background daemon by default (suppressible via `-NoStart`).
   - `build.ps1 -Release` automatically links `winpie.exe` into user `PATH` (`%USERPROFILE%\.cargo\bin\winpie.exe`) and creates the Windows Startup shortcut (`WinPie.lnk`).
 
 
@@ -104,31 +108,42 @@ As you switch windows, `winpie inspect` prints live diagnostic output:
 
 ### Building and Installing
 
-Use `build.ps1` to run the full verification pipeline and install globally:
+Use `build.ps1` to run the full verification pipeline, compile the binary, and automatically launch the daemon:
 
 ```powershell
-# Build optimized release binary, link to PATH, and create Windows Startup shortcut:
+# Build optimized release binary, link to PATH, install Windows Startup shortcut, and launch:
 .\build.ps1 -Release -Clippy -Test
 
-# Now you can run winpie from any terminal!
-winpie
+# Or build debug binary and immediately launch:
+.\build.ps1
 ```
 
 ### Build Script Options
 
 ```powershell
-.\build.ps1 -Release      # Compile optimized release binary & install to PATH/Startup
+.\build.ps1               # Compile debug binary and launch daemon in background
+.\build.ps1 -Release      # Compile optimized release binary, install to PATH/Startup, and launch
 .\build.ps1 -Test         # Run full unit and integration test suite
 .\build.ps1 -Clippy       # Run linter with -D warnings
 .\build.ps1 -Clean        # Clean target cache before building
 .\build.ps1 -All          # Full pipeline: Clean -> Clippy -> Build -> Test
+.\build.ps1 -NoStart      # Build artifact without automatically starting the background daemon
 ```
 
 ---
 
 ## Configuration Reference
 
-Configuration is defined in `config/default.yaml`:
+WinPie searches for `config.yaml` bare in the current working directory or adjacent to `winpie.exe`.
+
+To get started with the full configuration template:
+```powershell
+copy config.example.yaml config.yaml
+```
+
+> **Live Hot-Reloading**: WinPie automatically detects changes to `config.yaml` when you press <kbd>Win</kbd> + <kbd>Esc</kbd>. Edit and save your config anytime—no rebuilds or process restarts needed!
+
+Full configuration schema (from `config.example.yaml`):
 
 ```yaml
 activation:
@@ -351,8 +366,8 @@ winpie/
 ├── Cargo.toml
 ├── build.ps1                 # Release build, testing, linter, PATH & Startup installer
 ├── run.ps1                   # Local runner script
-├── config/
-│   └── default.yaml          # Runtime configuration, themes & contextual profiles
+├── config.example.yaml       # Fully documented configuration specification template
+├── config.yaml               # Active runtime configuration (gitignored, bare on CWD)
 ├── spec/
 │   ├── INVARIANTS.yaml       # Formal invariant specifications
 │   ├── STATE_MACHINE.yaml    # Formal FSM definition
@@ -383,6 +398,7 @@ winpie/
 │   ├── executor.rs           # Detached asynchronous command spawner
 │   └── diagnostics.rs        # Diagnostics logging & event tracking
 └── tests/
+    ├── config.rs             # Configuration schema, discovery & hot-reload test suite
     ├── context.rs            # Window context & contextual profile inheritance test suite
     ├── geometry.rs           # Geometry, label, theme, startup & toast test suite
     └── interaction.rs        # State machine, submenu & mouse hit-test verification
@@ -398,7 +414,8 @@ Run the full automated test suite:
 cargo test --all-targets
 ```
 
-All 36 unit and integration tests verify:
+All 53 unit and integration tests verify:
+- Configuration specification schema completeness and live hot-reloading
 - 8-way angular classification and rotation offsets
 - Multi-monitor negative virtual screen coordinate roundtrips
 - Deadzone and outer radius Euclidean boundaries

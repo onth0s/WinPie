@@ -1,0 +1,398 @@
+# ==============================================================================
+# WinPie Configuration Specification & Template
+# ==============================================================================
+# Copy this file to `config.yaml` in your working directory or next to winpie.exe:
+#   copy config.example.yaml config.yaml
+#
+# WinPie automatically hot-reloads `config.yaml` whenever you save changes.
+# No recompilation or manual restarting is required!
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# 1. Activation Hotkey & Modifiers
+# ------------------------------------------------------------------------------
+activation:
+  # The primary modifier key holding the gesture (default: "win")
+  # Options: win
+  modifier: win
+
+  # The trigger key tapped while the modifier is held (default: "escape")
+  # Options: escape
+  trigger: escape
+
+  # If true, the qualifying Escape DOWN keystroke is swallowed to prevent
+  # leaking cancel/escape events to foreground applications. (default: true)
+  swallow_trigger: true
+
+  # Qualify Left Windows Key as activation modifier (default: true)
+  left_win: true
+
+  # Qualify Right Windows Key as activation modifier (default: true)
+  right_win: true
+
+# ------------------------------------------------------------------------------
+# 2. Overlay Geometry & Window Properties
+# ------------------------------------------------------------------------------
+overlay:
+  # Outer radius of the radial menu in physical screen pixels (default: 180.0)
+  radius: 180.0
+
+  # Inner deadzone radius in physical screen pixels (default: 32.0).
+  # Clicks or releases inside this central circular boundary cancel the menu.
+  deadzone: 32.0
+
+  # Coordinate space interpretation (default: physical_screen_pixels)
+  coordinate_space: physical_screen_pixels
+
+  # Win32 window layer flags
+  window:
+    popup: true
+    toolwindow: true
+    topmost: true
+    no_activate: true
+    layered: true
+    transparent_input: true
+
+# ------------------------------------------------------------------------------
+# 3. Radial Wheel & Sector Mappings
+# ------------------------------------------------------------------------------
+wheel:
+  # Number of directional sectors. Currently fixed to 8 sectors:
+  # [N, NE, E, SE, S, SW, W, NW]
+  slices: 8
+
+  # Angular rotation offset in degrees.
+  # 0.0 centers North on [337.5°, 22.5°) (default: 0.0)
+  rotation_degrees: 0.0
+
+  # Human-readable labels displayed inside each sector slice
+  labels:
+    N: "Dev Tools"
+    NE: "Browser"
+    E: "Sublime"
+    SE: "Files"
+    S: "Settings"
+    SW: "Music"
+    W: "Tasks"
+    NW: "Chat"
+
+  # Ambient hover tooltips displayed in the primary toast notification
+  tooltips:
+    N: "Development environment, editors & build tools"
+    NE: "Open default web browser"
+    E: "Launch Sublime Text editor"
+    SE: "Open Windows File Explorer"
+    S: "Open Windows Settings"
+    SW: "Open Media / Music player"
+    W: "Open Task Manager"
+    NW: "Open Communications / Chat"
+
+  # Direct system command lines spawned asynchronously on sector commit.
+  # If a sector defines a submenu in `menus`, the submenu takes precedence.
+  commands:
+    NE: "cmd.exe /c start https://google.com"
+    E: "sublime.exe"
+    SE: "explorer.exe"
+    S: "control.exe"
+    W: "taskmgr.exe"
+
+  # Nested modal submenus spawned when a sector is committed.
+  # Submenus support arbitrary nesting depth with keyboard and mouse navigation:
+  # - KeyDown / Hover: Previews row glow and shows tooltip.
+  # - KeyUp / Left-Click: Commits action or drills down into nested menu.
+  # - Tab: Resets / loops navigation to root submenu.
+  # - Shift+Tab: Backtracks to parent submenu level.
+  # - Esc / Right-Click: Unconditionally cancels interaction.
+  menus:
+    N:
+      title: "Dev Tools"
+      tooltip: "Development tools, editors, and build pipelines"
+      items:
+        a:
+          label: "VS Code"
+          tooltip: "Launch Visual Studio Code"
+          command: "code.exe"
+        s:
+          label: "Sublime Text"
+          tooltip: "Launch Sublime Text editor"
+          command: "sublime.exe"
+        t:
+          label: "Windows Terminal"
+          tooltip: "Open Windows Terminal"
+          command: "wt.exe"
+        d:
+          label: "Cargo Pipeline"
+          tooltip: "Rust build and test commands"
+          menu:
+            title: "Cargo Pipeline"
+            tooltip: "Cargo clean, build, and test actions"
+            items:
+              c:
+                label: "Cargo Clean"
+                tooltip: "Wipe target build cache"
+                command: "cargo clean"
+              b:
+                label: "Cargo Build"
+                tooltip: "Compile debug binary"
+                command: "cargo build"
+              t:
+                label: "Cargo Test"
+                tooltip: "Run test suite"
+                command: "cargo test"
+
+  # Optional unified recursive command node graph (Phase 6 / 8 topology)
+  # nodes:
+  #   NW:
+  #     label: "Communications"
+  #     tooltip: "Chat & messaging apps"
+  #     children:
+  #       d:
+  #         label: "Discord"
+  #         command: "discord.exe"
+  #       s:
+  #         label: "Slack"
+  #         command: "slack.exe"
+
+# ------------------------------------------------------------------------------
+# 4. Rendering & Typography
+# ------------------------------------------------------------------------------
+rendering:
+  # Draw radial dividing spokes between sector slices (default: true)
+  show_stubs: true
+
+  # Draw inner deadzone core boundary circle (default: true)
+  show_deadzone: true
+
+  # Draw sector glow and highlight when hovered (default: true)
+  highlight_hovered: true
+
+  # Render text labels on radial wheel slices (default: true)
+  show_labels: true
+
+  font:
+    # ClearType typography font family name (default: "Segoe UI")
+    family: "Segoe UI"
+
+    # Font size in points (default: 13)
+    size: 13
+
+    # GDI font weight: 400 (normal), 600 (semi-bold), 700 (bold) (default: 600)
+    weight: 600
+
+    # Distance of sector labels from center as ratio of outer radius (default: 0.62)
+    radius_ratio: 0.62
+
+# ------------------------------------------------------------------------------
+# 5. Diagnostics & Event Logging
+# ------------------------------------------------------------------------------
+diagnostics:
+  # Master toggle for logging (default: true)
+  enabled: true
+
+  # Log sector commits and executed command lines (default: true)
+  log_selection: true
+
+  # Log menu cancellations (RMB, Esc, deadzone clicks) (default: true)
+  log_cancel: true
+
+  # Log fatal hook or Win32 errors (default: true)
+  log_fatal_errors: true
+
+# ------------------------------------------------------------------------------
+# 6. Toast Notification HUDs
+# ------------------------------------------------------------------------------
+toast:
+  # Master toggle for action commit notifications and hover tooltips (default: true)
+  enabled: true
+
+  # Show ambient tooltip toast when hovering sectors or submenu rows (default: true)
+  show_hover_tooltips: true
+
+  # Display duration for action commit toasts in milliseconds (default: 1000ms / 1s)
+  duration_ms: 1000
+
+  # Screen corner placement: top_right, top_left, bottom_right, bottom_left (default: top_right)
+  corner: top_right
+
+  # Margin from horizontal screen edge in physical pixels (default: 24)
+  margin_x: 24
+
+  # Margin from vertical screen edge in physical pixels (default: 24)
+  margin_y: 24
+
+  # Typography font size in points (default: 13)
+  font_size: 13
+
+  # Toast card corner rounding radius in physical pixels (default: 4.0)
+  corner_radius: 4.0
+
+  # Append directional sector name to commit toast text (e.g. "Dev Tools (N)") (default: true)
+  show_sector_direction: true
+
+startup_toast:
+  # Display welcome toast when WinPie daemon initializes (default: true)
+  enabled: true
+
+  # Duration in milliseconds (default: 5000ms / 5s)
+  duration_ms: 5000
+
+  # Placement corner (default: top_right)
+  corner: top_right
+
+  margin_x: 24
+  margin_y: 24
+  font_size: 13
+  corner_radius: 4.0
+
+  # Text message displayed on startup
+  text: "WinPie is active (Press Win+Esc)"
+
+hint_toast:
+  # Dedicated bottom hint HUD displayed during modal submenus (default: true)
+  enabled: true
+
+  # Screen corner placement (default: bottom_right)
+  corner: bottom_right
+
+  margin_x: 24
+  margin_y: 24
+  font_size: 11
+  corner_radius: 4.0
+
+  # Navigation instructions shown during submenu drill-down
+  text: "[Tab] Loop   [Shift+Tab] Back   [Esc / RMB] Cancel"
+
+# ------------------------------------------------------------------------------
+# 7. Global Universal Theme
+# ------------------------------------------------------------------------------
+theme:
+  # Corner radius for modal submenu cards in physical pixels (default: 4.0)
+  menu_corner_radius: 4.0
+
+  # Corner radius for toast notifications in physical pixels (default: 4.0)
+  toast_corner_radius: 4.0
+
+  # Primary accent highlight color (#RRGGBB) (default: "#00AFFF")
+  accent_color: "#00AFFF"
+
+  # Accent opacity multiplier: 0.0 (transparent) to 1.0 (opaque) (default: 1.0)
+  accent_opacity: 1.0
+
+  # Main card background fill color (default: "#14161C")
+  main_bg_color: "#14161C"
+  main_bg_opacity: 0.94
+
+  # Secondary / item badge background fill color (default: "#1E222B")
+  secondary_bg_color: "#1E222B"
+  secondary_bg_opacity: 0.80
+
+  # Window and card border outline color (default: "#3C465A")
+  border_color: "#3C465A"
+  border_opacity: 0.85
+
+  # Primary typography color (titles, labels) (default: "#FFFFFF")
+  text_primary: "#FFFFFF"
+
+  # Secondary typography color (tooltips, navigation hints) (default: "#A0A5B5")
+  text_secondary: "#A0A5B5"
+
+  # Highlighted typography color (shortcuts, active rows) (default: "#00AFFF")
+  text_accent: "#00AFFF"
+
+  # Radial wheel visual styling
+  wheel:
+    # Sector dividing spoke line color (default: "#EBEBEB")
+    spoke_color: "#EBEBEB"
+    spoke_opacity: 0.75
+
+    # Outer perimeter rim circle line color (default: "#F0F0F0")
+    rim_color: "#F0F0F0"
+    rim_opacity: 0.86
+
+    # Sector highlight glow color when hovered (default: "#00AFFF")
+    hover_glow_color: "#00AFFF"
+    hover_glow_opacity: 0.86
+
+    # Base sector slice background fill color (default: "#16181E")
+    sector_bg_color: "#16181E"
+    sector_bg_opacity: 0.59
+
+    # Central deadzone circular background fill color (default: "#141414")
+    deadzone_bg_color: "#141414"
+    deadzone_bg_opacity: 0.51
+
+    # Central deadzone circular boundary line color (default: "#F0F0F0")
+    deadzone_border_color: "#F0F0F0"
+    deadzone_border_opacity: 0.86
+
+# ------------------------------------------------------------------------------
+# 8. Dynamic Contextual Profiles
+# ------------------------------------------------------------------------------
+# Profiles automatically adapt radial menu bindings and appearance to the
+# active foreground window. Unassigned sectors seamlessly fall back to global
+# definitions. Run `winpie inspect` in a terminal to diagnose window rules.
+# ------------------------------------------------------------------------------
+profiles:
+  - name: "Visual Studio Code"
+    match_rules:
+      # Match executable filename (case-insensitive)
+      process: "code.exe"
+      # Optional criteria:
+      # window_class: "Chrome_WidgetWin_1"
+      # window_title: "Visual Studio Code"
+      # window_title_contains: "WinPie"
+      # clipboard_has_text: true
+      # clipboard_has_files: false
+
+    wheel:
+      labels:
+        N: "Format Document"
+        NE: "Command Palette"
+        E: "Go to Symbol"
+        SE: "File Explorer"
+        S: "Toggle Terminal"
+        SW: "Git Status"
+        W: "Find in Files"
+        NW: "Toggle Sidebar"
+      tooltips:
+        N: "Format current active code document"
+        NE: "Open VS Code Command Palette"
+        E: "Quick jump to symbol in file"
+        SE: "Reveal file in Explorer sidebar"
+        S: "Toggle built-in integrated terminal"
+        SW: "Show Source Control git panel"
+        W: "Search across entire workspace"
+        NW: "Toggle primary sidebar visibility"
+      commands:
+        N: "cmd.exe /c code --command editor.action.formatDocument"
+        NE: "cmd.exe /c code --command workbench.action.showCommands"
+        S: "cmd.exe /c code --command workbench.action.terminal.toggleTerminal"
+        W: "cmd.exe /c code --command workbench.action.findInFiles"
+
+  - name: "Windows File Explorer"
+    match_rules:
+      process: "explorer.exe"
+      window_class: "CabinetWClass"
+
+    wheel:
+      labels:
+        N: "New Folder"
+        NE: "Terminal Here"
+        E: "VS Code Here"
+        SE: "Copy Path"
+        S: "Properties"
+        SW: "Select All"
+        W: "Git Bash Here"
+        NW: "Refresh"
+      tooltips:
+        N: "Create a new directory"
+        NE: "Open Windows Terminal in current directory"
+        E: "Open directory in Visual Studio Code"
+        SE: "Copy full path to clipboard"
+        S: "Open Properties window"
+        SW: "Select all items in folder"
+        W: "Open Git Bash here"
+        NW: "Refresh directory view"
+      commands:
+        NE: "wt.exe"
+        E: "code.exe ."

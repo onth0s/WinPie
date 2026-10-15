@@ -25,9 +25,12 @@ fn print_help() {
 }
 
 fn run_inspector() -> Result<(), Box<dyn std::error::Error>> {
-    let config = winpie::config::AppConfig::load_or_default("config/default.yaml");
+    let (config, path) = winpie::config::AppConfig::discover_and_load();
     println!("============================================================");
     println!("  WinPie Window Context & Profile Inspector");
+    if let Some(p) = path {
+        println!("  Loaded Configuration: {}", p.display());
+    }
     println!("============================================================");
     println!("Active Profiles Configured: {}", config.profiles.len());
     for (i, p) in config.profiles.iter().enumerate() {

@@ -16,16 +16,22 @@
     Runs full verification pipeline: Clean -> Clippy -> Build -> Test.
 .EXAMPLE
     .\build.ps1
+.PARAMETER NoStart
+    Skips automatically starting the WinPie daemon after compilation.
+.EXAMPLE
+    .\build.ps1
     .\build.ps1 -Release
     .\build.ps1 -Release -Test -Clippy
     .\build.ps1 -All
+    .\build.ps1 -NoStart
 #>
 param(
     [switch]$Release,
     [switch]$Test,
     [switch]$Clippy,
     [switch]$Clean,
-    [switch]$All
+    [switch]$All,
+    [switch]$NoStart
 )
 
 $ErrorActionPreference = "Stop"
@@ -138,6 +144,21 @@ if (Test-Path $exePath) {
             $shortcut.Save()
             Write-Host "[STARTUP] Created Startup Shortcut: $shortcutPath" -ForegroundColor Green
         }
+    }
+
+    # 6. Automatically start the WinPie background daemon unless -NoStart was requested
+    if (-not $NoStart) {
+        Write-Host "[START]   Launching WinPie daemon in background..." -ForegroundColor Green
+        Start-Process -FilePath $exePath -WorkingDirectory $PSScriptRoot
+        Start-Sleep -Milliseconds 300
+        $runningDaemon = Get-Process -Name winpie -ErrorAction SilentlyContinue
+        if ($runningDaemon) {
+            Write-Host "[RUNNING] WinPie daemon is active (PID $($runningDaemon[0].Id)). Press Win+Esc to activate!" -ForegroundColor Green
+        } else {
+            Write-Host "[WARN]    WinPie did not report as running after launch." -ForegroundColor Yellow
+        }
+    } else {
+        Write-Host "[SKIP]    Daemon startup skipped (-NoStart specified)." -ForegroundColor DarkGray
     }
 }
 Write-Host "[INFO]    Elapsed Time: $elapsedSec s" -ForegroundColor DarkCyan

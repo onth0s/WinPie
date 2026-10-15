@@ -133,6 +133,78 @@ impl OverlayWindow {
         self.hwnd
     }
 
+    pub fn reload_config(&mut self, config: &AppConfig) {
+        let radius = config.overlay.radius as i32;
+        let deadzone = config.overlay.deadzone as i32;
+        let rotation = config.wheel.rotation_degrees;
+        let new_size = (radius + 20) * 2;
+
+        unsafe {
+            if new_size != self.size {
+                let _ = SelectObject(self.mem_dc, HBITMAP::default());
+                let _ = DeleteObject(self.bitmap);
+
+                let screen_dc = GetDC(None);
+                let mut bmi: BITMAPINFO = std::mem::zeroed();
+                bmi.bmiHeader.biSize = std::mem::size_of::<BITMAPINFOHEADER>() as u32;
+                bmi.bmiHeader.biWidth = new_size;
+                bmi.bmiHeader.biHeight = -new_size; // Top-down
+                bmi.bmiHeader.biPlanes = 1;
+                bmi.bmiHeader.biBitCount = 32;
+                bmi.bmiHeader.biCompression = BI_RGB.0;
+
+                let mut bits_raw: *mut std::ffi::c_void = std::ptr::null_mut();
+                if let Ok(bmp) = CreateDIBSection(
+                    self.mem_dc,
+                    &bmi,
+                    DIB_RGB_COLORS,
+                    &mut bits_raw,
+                    None,
+                    0,
+                ) {
+                    let _ = SelectObject(self.mem_dc, bmp);
+                    self.bitmap = bmp;
+                    self.bits_ptr = bits_raw as *mut u32;
+                    self.size = new_size;
+                }
+                ReleaseDC(None, screen_dc);
+
+                let _ = SetWindowPos(
+                    self.hwnd,
+                    HWND_TOPMOST,
+                    0,
+                    0,
+                    new_size,
+                    new_size,
+                    SWP_NOMOVE | SWP_NOACTIVATE | SWP_NOZORDER,
+                );
+            }
+        }
+
+        self.default_buffers = generate_precomputed_buffers(
+            config,
+            self.size,
+            radius as f64,
+            deadzone as f64,
+            rotation,
+            None,
+        );
+
+        let mut profile_buffers = Vec::with_capacity(config.profiles.len());
+        for (idx, _) in config.profiles.iter().enumerate() {
+            let p_bufs = generate_precomputed_buffers(
+                config,
+                self.size,
+                radius as f64,
+                deadzone as f64,
+                rotation,
+                Some(idx),
+            );
+            profile_buffers.push(p_bufs);
+        }
+        self.profile_buffers = profile_buffers;
+    }
+
     pub fn show_at(&self, center: Point, hover: Option<Sector>, profile_idx: Option<usize>) {
         self.active_profile_idx.set(profile_idx);
         let half = self.size / 2;

@@ -33,6 +33,8 @@ unsafe extern "system" fn console_ctrl_handler(ctrl_type: u32) -> BOOL {
 
 pub struct Application {
     config: AppConfig,
+    config_path: Option<std::path::PathBuf>,
+    config_last_modified: Option<std::time::SystemTime>,
     diagnostics: Diagnostics,
     fsm: InteractionFsm,
     overlay: OverlayWindow,
@@ -51,7 +53,13 @@ impl Application {
             let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         }
 
-        let config = AppConfig::load_or_default("config/default.yaml");
+        let (config, config_path) = AppConfig::discover_and_load();
+        let config_last_modified = config_path.as_ref()
+            .and_then(|p| std::fs::metadata(p).ok())
+            .and_then(|m| m.modified().ok());
+        if let Some(ref p) = config_path {
+            println!("[WinPie] Configuration active: {}", p.display());
+        }
         let diagnostics = Diagnostics::new(config.diagnostics.clone());
 
         let geom_config = GeometryConfig {
@@ -80,6 +88,8 @@ impl Application {
 
         Ok(Self {
             config,
+            config_path,
+            config_last_modified,
             diagnostics,
             fsm,
             overlay,
@@ -180,7 +190,62 @@ impl Application {
         Ok(())
     }
 
+    fn check_and_reload_config(&mut self) {
+        let path = match &self.config_path {
+            Some(p) => p.clone(),
+            None => {
+                if let Some(p) = crate::config::discover_config_path() {
+                    self.config_path = Some(p.clone());
+                    p
+                } else {
+                    return;
+                }
+            }
+        };
+
+        let current_mtime = match std::fs::metadata(&path).and_then(|m| m.modified()) {
+            Ok(t) => t,
+            Err(_) => return,
+        };
+
+        if let Some(last_mtime) = self.config_last_modified {
+            if current_mtime <= last_mtime {
+                return;
+            }
+        }
+
+        match std::fs::read_to_string(&path) {
+            Ok(content) => {
+                match serde_yaml::from_str::<AppConfig>(&content) {
+                    Ok(new_config) => {
+                        println!("[WinPie] Hot-reloaded configuration from {}", path.display());
+                        self.config_last_modified = Some(current_mtime);
+
+                        let geom_config = GeometryConfig {
+                            radius: new_config.overlay.radius,
+                            deadzone: new_config.overlay.deadzone,
+                            rotation_degrees: new_config.wheel.rotation_degrees,
+                            slices: new_config.wheel.slices,
+                        };
+                        self.fsm.config = geom_config;
+                        self.overlay.reload_config(&new_config);
+                        self.diagnostics = Diagnostics::new(new_config.diagnostics.clone());
+                        self.config = new_config;
+                    }
+                    Err(e) => {
+                        eprintln!("[WinPie] Warning: Failed to parse updated {}: {}", path.display(), e);
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("[WinPie] Warning: Failed to read {}: {}", path.display(), e);
+            }
+        }
+    }
+
     fn handle_activate(&mut self, anchor: Point) {
+        self.check_and_reload_config();
+
         // Capture frozen InvocationContext snapshot atomically once at invocation trigger (INV-CTX-001)
         let inv = crate::context::capture_invocation_context(anchor);
         let profile_idx = self.config.find_matching_profile_for_invocation(&inv);

@@ -106,8 +106,8 @@ The low-level hooks are deliberately thin. They observe/intercept input and hand
 ```text
 winpie/
 ├── Cargo.toml
-├── config/
-│   └── default.yaml
+├── config.example.yaml
+├── config.yaml
 ├── spec/
 │   ├── INVARIANTS.yaml
 │   ├── STATE_MACHINE.yaml
@@ -138,7 +138,7 @@ winpie/
 
 # 5. Runtime Configuration
 
-`config/default.yaml`
+`config.yaml` (template in `config.example.yaml`)
 
 ```yaml
 activation:
@@ -1475,7 +1475,7 @@ all activation keys released -> state == IDLE (re-armed)
 
 ### AT-020 — Configurable Sector Labels
 
-Configure custom labels in `config/default.yaml` (e.g. `E: "Sublime"`).
+Configure custom labels in `config.yaml` (e.g. `E: "Sublime"`).
 
 Expected:
 
@@ -1501,7 +1501,7 @@ consecutive commits reset dismiss countdown smoothly
 
 ### AT-022 — Arbitrary Command Execution
 
-Configure `wheel.commands` in `config/default.yaml` (e.g. `E: "sublime.exe"`).
+Configure `wheel.commands` in `config.yaml` (e.g. `E: "sublime.exe"`).
 Commit sector `E`.
 
 Expected:
