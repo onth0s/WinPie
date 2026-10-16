@@ -8,14 +8,14 @@ fn print_help() {
     println!("WinPie - High-Performance Radial Menu for Windows\n");
     println!("USAGE:");
     println!("  winpie                       Start WinPie radial menu daemon in the background");
+    println!("  winpie debug                 Stream live diagnostic logs (Ctrl+C detaches safely)");
     println!("  winpie kill                  Stop the running WinPie process");
-    println!("  winpie reload                Restart / reload WinPie with updated config");
+    println!("  winpie reload [debug]        Restart WinPie with updated config (optionally stream logs)");
     println!("  winpie status                Check if WinPie is currently running");
     println!("  winpie inspect               Live stream foreground window context & profile matching");
     println!("  winpie autostart enable      Launch WinPie automatically on Windows login");
     println!("  winpie autostart disable     Remove WinPie from Windows startup");
     println!("  winpie autostart status      Check Windows startup shortcut status");
-    println!("  winpie --foreground          Run in foreground attached to terminal (debug mode)");
     println!("  winpie help                  Show this help message\n");
     println!("DEFAULT CONTROLS:");
     println!("  Win + Esc                    Activate radial pie menu");
@@ -90,6 +90,40 @@ fn run_inspector() -> Result<(), Box<dyn std::error::Error>> {
     }
 }
 
+fn run_debug_tail() -> Result<(), Box<dyn std::error::Error>> {
+    use std::io::{BufRead, BufReader, Seek, SeekFrom, Write};
+
+    let log_path = winpie::diagnostics::get_log_path();
+
+    if !log_path.exists() {
+        let _ = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_path)?;
+    }
+
+    let file = std::fs::OpenOptions::new().read(true).open(&log_path)?;
+    let mut reader = BufReader::new(file);
+    let _ = reader.seek(SeekFrom::End(0));
+
+    let mut line = String::new();
+    loop {
+        line.clear();
+        match reader.read_line(&mut line) {
+            Ok(0) => {
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            Ok(_) => {
+                print!("{}", line);
+                let _ = std::io::stdout().flush();
+            }
+            Err(_) => {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+        }
+    }
+}
+
 fn spawn_detached_daemon() -> Result<(), Box<dyn std::error::Error>> {
     let current_exe = std::env::current_exe()?;
     let _ = std::process::Command::new(current_exe)
@@ -116,11 +150,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 return Ok(());
             }
             "reload" | "restart" => {
-                println!("[WinPie] Reloading WinPie...");
+                let debug_mode = args.get(2).map(|s| s.as_str()) == Some("debug")
+                    || args.get(2).map(|s| s.as_str()) == Some("--debug")
+                    || args.get(2).map(|s| s.as_str()) == Some("-d")
+                    || args.get(2).map(|s| s.as_str()) == Some("--foreground")
+                    || args.get(2).map(|s| s.as_str()) == Some("-f");
+
                 if winpie::ipc::is_running() {
                     let _ = winpie::ipc::signal_kill();
                 }
                 spawn_detached_daemon()?;
+
+                if debug_mode {
+                    std::thread::sleep(std::time::Duration::from_millis(150));
+                    return run_debug_tail();
+                }
+
                 println!("[WinPie] WinPie restarted in background (Press Win+Esc to activate).");
                 return Ok(());
             }
@@ -158,6 +203,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 return Ok(());
             }
+            "debug" | "--debug" | "-d" | "--foreground" | "-f" => {
+                // Live log tailing without banner prompts; Ctrl+C detaches cleanly without killing daemon
+                if !winpie::ipc::is_running() {
+                    spawn_detached_daemon()?;
+                    std::thread::sleep(std::time::Duration::from_millis(150));
+                }
+                return run_debug_tail();
+            }
             "--daemon" => {
                 // Background daemon execution loop (spawned detached)
                 let _mutex_handle = match winpie::ipc::try_acquire_singleton() {
@@ -166,19 +219,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 };
                 let mut app = Application::new()?;
                 return app.run(true);
-            }
-            "--foreground" | "-f" => {
-                // Foreground attached execution loop (for dev runner / debugging)
-                let _mutex_handle = match winpie::ipc::try_acquire_singleton() {
-                    Some(handle) => handle,
-                    None => {
-                        println!("[WinPie] WinPie is already running in the background.");
-                        println!("Run 'winpie help' for available CLI commands or 'winpie reload' to restart.\n");
-                        return Ok(());
-                    }
-                };
-                let mut app = Application::new()?;
-                return app.run(false);
             }
             "help" | "--help" | "-h" | "/?" => {
                 print_help();

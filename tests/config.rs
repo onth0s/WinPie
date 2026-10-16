@@ -196,3 +196,13 @@ wheel:
 
     let _ = fs::remove_dir_all(&temp_dir);
 }
+
+#[test]
+fn test_diagnostics_log_file_append() {
+    let log_path = winpie::diagnostics::get_log_path();
+    let marker = format!("TEST_LOG_ENTRY_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos());
+    winpie::diagnostics::log_raw(&marker);
+
+    let content = fs::read_to_string(&log_path).expect("Read debug log file");
+    assert!(content.contains(&marker), "Log file must contain written entry");
+}

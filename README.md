@@ -58,8 +58,9 @@ WinPie - High-Performance Radial Menu for Windows
 
 USAGE:
   winpie                       Start WinPie radial menu daemon
+  winpie debug                 Stream live diagnostic logs (Ctrl+C detaches safely)
   winpie kill                  Stop the running WinPie process
-  winpie reload                Restart / reload WinPie with updated config
+  winpie reload [debug]        Restart WinPie with updated config (optionally stream logs)
   winpie status                Check if WinPie is currently running
   winpie inspect               Live stream active window context & profile matching
   winpie autostart enable      Launch WinPie automatically on Windows login

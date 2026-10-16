@@ -58,7 +58,7 @@ impl Application {
             .and_then(|p| std::fs::metadata(p).ok())
             .and_then(|m| m.modified().ok());
         if let Some(ref p) = config_path {
-            println!("[WinPie] Configuration active: {}", p.display());
+            crate::diagnostics::log_raw(&format!("[WinPie] Configuration active: {}", p.display()));
         }
         let diagnostics = Diagnostics::new(config.diagnostics.clone());
 
@@ -103,17 +103,7 @@ impl Application {
         })
     }
 
-    pub fn run(&mut self, is_daemon: bool) -> Result<(), Box<dyn std::error::Error>> {
-        if !is_daemon {
-            println!("WinPie running.");
-            println!("- Press Win+Esc to open radial menu.");
-            println!("- Left-click sector to commit or enter submenu.");
-            println!("- Releasing Win key commits hovered sector.");
-            println!("- Right-click or Esc cancels anytime.");
-            println!("- In Modal Submenus: Hover or KeyDown previews, Click or KeyUp executes.");
-            println!("- Run 'winpie help' in any terminal for CLI commands.");
-            println!("- Press Ctrl+C in terminal or run 'winpie kill' to exit.\n");
-        }
+    pub fn run(&mut self, _is_daemon: bool) -> Result<(), Box<dyn std::error::Error>> {
 
         // Display configurable startup toast
         if self.config.startup_toast.enabled && !self.config.startup_toast.text.is_empty() {
@@ -218,7 +208,7 @@ impl Application {
             Ok(content) => {
                 match serde_yaml::from_str::<AppConfig>(&content) {
                     Ok(new_config) => {
-                        println!("[WinPie] Hot-reloaded configuration from {}", path.display());
+                        crate::diagnostics::log_raw(&format!("[WinPie] Hot-reloaded configuration from {}", path.display()));
                         self.config_last_modified = Some(current_mtime);
 
                         let geom_config = GeometryConfig {
@@ -233,12 +223,12 @@ impl Application {
                         self.config = new_config;
                     }
                     Err(e) => {
-                        eprintln!("[WinPie] Warning: Failed to parse updated {}: {}", path.display(), e);
+                        crate::diagnostics::log_raw(&format!("[WinPie] Warning: Failed to parse updated {}: {}", path.display(), e));
                     }
                 }
             }
             Err(e) => {
-                eprintln!("[WinPie] Warning: Failed to read {}: {}", path.display(), e);
+                crate::diagnostics::log_raw(&format!("[WinPie] Warning: Failed to read {}: {}", path.display(), e));
             }
         }
     }
@@ -343,8 +333,8 @@ impl Application {
 
         if let Some(cmd) = self.config.get_command_for_sector_with_profile(sector, profile_idx) {
             match execute_command_with_context(cmd, self.active_invocation.as_ref()) {
-                Ok(_) => println!("[WinPie:ACTION] Executed: {}", cmd),
-                Err(e) => eprintln!("[WinPie:ACTION ERROR] Failed to execute '{}': {}", cmd, e),
+                Ok(_) => crate::diagnostics::log_raw(&format!("[WinPie:ACTION] Executed: {}", cmd)),
+                Err(e) => crate::diagnostics::log_raw(&format!("[WinPie:ACTION ERROR] Failed to execute '{}': {}", cmd, e)),
             }
         }
     }
@@ -369,8 +359,8 @@ impl Application {
                             self.toast.show(anchor, &text, &self.config.toast, theme);
 
                             match execute_command_with_context(&command, self.active_invocation.as_ref()) {
-                                Ok(_) => println!("[WinPie:ACTION] Executed: {}", command),
-                                Err(e) => eprintln!("[WinPie:ACTION ERROR] Failed to execute '{}': {}", command, e),
+                                Ok(_) => crate::diagnostics::log_raw(&format!("[WinPie:ACTION] Executed: {}", command)),
+                                Err(e) => crate::diagnostics::log_raw(&format!("[WinPie:ACTION ERROR] Failed to execute '{}': {}", command, e)),
                             }
                         }
                         InteractionEffect::MenuDrillDown { .. } => {
@@ -472,8 +462,8 @@ impl Application {
                 self.toast.show(anchor, &text, &self.config.toast, theme);
 
                 match execute_command_with_context(&command, self.active_invocation.as_ref()) {
-                    Ok(_) => println!("[WinPie:ACTION] Executed: {}", command),
-                    Err(e) => eprintln!("[WinPie:ACTION ERROR] Failed to execute '{}': {}", command, e),
+                    Ok(_) => crate::diagnostics::log_raw(&format!("[WinPie:ACTION] Executed: {}", command)),
+                    Err(e) => crate::diagnostics::log_raw(&format!("[WinPie:ACTION ERROR] Failed to execute '{}': {}", command, e)),
                 }
             }
             InteractionEffect::MenuDrillDown { .. } => {
