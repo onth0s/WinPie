@@ -124,25 +124,27 @@ if (Test-Path $exePath) {
     Write-Host "[SUCCESS] Artifact: $exePath" -ForegroundColor Green
     Write-Host "[INFO]    Binary Size: $sizeMb MB ($sizeKb KB)" -ForegroundColor DarkCyan
 
-    # 5. Sync to PATH (.cargo\bin) for all builds; create Windows Startup Shortcut if Release
+    # 5. Sync to PATH (.cargo\bin) for all builds; maintain Windows Startup Shortcut
     $cargoBin = Join-Path $env:USERPROFILE ".cargo\bin"
+    $canonicalExe = $exePath
     if (Test-Path $cargoBin) {
         $destPath = Join-Path $cargoBin "winpie.exe"
         Copy-Item -Path $exePath -Destination $destPath -Force
         Write-Host "[PATH]    Synced to $destPath (Run 'winpie' from any terminal)" -ForegroundColor Green
+        $canonicalExe = $destPath
     }
 
-    if ($Release) {
-        $startupFolder = [System.IO.Path]::Combine($env:APPDATA, "Microsoft\Windows\Start Menu\Programs\Startup")
-        if (Test-Path $startupFolder) {
-            $shortcutPath = Join-Path $startupFolder "WinPie.lnk"
+    $startupFolder = [System.IO.Path]::Combine($env:APPDATA, "Microsoft\Windows\Start Menu\Programs\Startup")
+    if (Test-Path $startupFolder) {
+        $shortcutPath = Join-Path $startupFolder "WinPie.lnk"
+        if ($Release -or (Test-Path $shortcutPath)) {
             $wscript = New-Object -ComObject WScript.Shell
             $shortcut = $wscript.CreateShortcut($shortcutPath)
-            $shortcut.TargetPath = $exePath
+            $shortcut.TargetPath = $canonicalExe
             $shortcut.WorkingDirectory = $PSScriptRoot
             $shortcut.Description = "WinPie Radial Menu Daemon"
             $shortcut.Save()
-            Write-Host "[STARTUP] Created Startup Shortcut: $shortcutPath" -ForegroundColor Green
+            Write-Host "[STARTUP] Updated Startup Shortcut: $shortcutPath -> $canonicalExe" -ForegroundColor Green
         }
     }
 

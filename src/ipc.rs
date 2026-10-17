@@ -195,14 +195,26 @@ pub fn set_autostart(enable: bool) -> Result<(), Box<dyn std::error::Error>> {
 
     if enable {
         let current_exe = std::env::current_exe()?;
-        let target_str = current_exe.to_string_lossy();
-        let parent_dir = current_exe.parent().unwrap_or(&current_exe).to_string_lossy();
+        let cargo_bin_exe = std::env::var("USERPROFILE")
+            .map(|u| PathBuf::from(u).join(".cargo").join("bin").join("winpie.exe"))
+            .unwrap_or_else(|_| current_exe.clone());
+
+        let target_exe = if cargo_bin_exe.exists() {
+            cargo_bin_exe
+        } else {
+            current_exe
+        };
+
+        let target_str = target_exe.to_string_lossy();
+        let work_dir = std::env::current_dir()
+            .unwrap_or_else(|_| target_exe.parent().unwrap_or(&target_exe).to_path_buf());
+        let work_dir_str = work_dir.to_string_lossy();
         let link_str = shortcut_path.to_string_lossy();
 
         // Use PowerShell WScript.Shell COM object to create rock-solid Windows shortcut
         let ps_script = format!(
             "$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut('{}'); $s.TargetPath = '{}'; $s.WorkingDirectory = '{}'; $s.Description = 'WinPie Radial Menu Daemon'; $s.Save()",
-            link_str, target_str, parent_dir
+            link_str, target_str, work_dir_str
         );
 
         let status = Command::new("powershell")

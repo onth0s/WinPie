@@ -126,10 +126,15 @@ fn run_debug_tail() -> Result<(), Box<dyn std::error::Error>> {
 
 fn spawn_detached_daemon() -> Result<(), Box<dyn std::error::Error>> {
     let current_exe = std::env::current_exe()?;
-    let _ = std::process::Command::new(current_exe)
-        .arg("--daemon")
-        .creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS)
-        .spawn()?;
+    let mut cmd = std::process::Command::new(current_exe);
+    cmd.arg("--daemon")
+        .creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS);
+
+    if let Ok(cwd) = std::env::current_dir() {
+        cmd.current_dir(cwd);
+    }
+
+    cmd.spawn()?;
     Ok(())
 }
 
