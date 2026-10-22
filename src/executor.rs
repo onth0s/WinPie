@@ -29,7 +29,28 @@ pub fn execute_command_with_context(
             c
         } else {
             let mut c = std::process::Command::new("cmd.exe");
-            c.raw_arg(format!("/C {}", clean));
+            // If the command is a path with spaces or contains an executable path that isn't quoted,
+            // or is a bare path that exists on disk, wrap appropriately for cmd.exe /C
+            let formatted_cmd = if clean.contains(' ') && !clean.starts_with('"') {
+                // Check if the entire string or the first token is an existing file
+                let path_buf = std::path::PathBuf::from(clean);
+                if path_buf.is_file() {
+                    format!("/C \"\"{}\"\"", clean)
+                } else if let Some(first_space) = clean.find(' ') {
+                    let first_part = &clean[..first_space];
+                    let rest = &clean[first_space..];
+                    if std::path::Path::new(first_part).is_file() {
+                        format!("/C \"\"{}\"{}\"", first_part, rest)
+                    } else {
+                        format!("/C {}", clean)
+                    }
+                } else {
+                    format!("/C {}", clean)
+                }
+            } else {
+                format!("/C {}", clean)
+            };
+            c.raw_arg(formatted_cmd);
             c
         };
 

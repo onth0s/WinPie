@@ -58,6 +58,21 @@ Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  WinPie Build Pipeline ($mode)" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 
+# 0.5 Validate YAML configs for common escaping errors
+if (Test-Path "config.yaml") {
+    $cfgContent = Get-Content "config.yaml" -Raw
+    $cfgLines = $cfgContent -split "`r?`n"
+    for ($i = 0; $i -lt $cfgLines.Length; $i++) {
+        $line = $cfgLines[$i]
+        if ($line -match '"[^"]*:[\\/][^"]*"') {
+            if ($line -match '":\\[^\\"]') {
+                Write-Host "[WARN] config.yaml line $($i + 1): Unescaped backslash in path (Auto-repair enabled at runtime):" -ForegroundColor Yellow
+                Write-Host "       $($line.Trim())" -ForegroundColor DarkGray
+            }
+        }
+    }
+}
+
 # 1. Clean if requested
 if ($Clean) {
     Write-Host "[CLEAN] Cleaning build target..." -ForegroundColor Yellow

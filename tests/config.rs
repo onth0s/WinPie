@@ -206,3 +206,35 @@ fn test_diagnostics_log_file_append() {
     let content = fs::read_to_string(&log_path).expect("Read debug log file");
     assert!(content.contains(&marker), "Log file must contain written entry");
 }
+
+#[test]
+fn test_yaml_auto_repair_unescaped_windows_paths() {
+    let raw_yaml = r#"
+wheel:
+  labels:
+    SW: "Telegram"
+  commands:
+    SW: "C:\Users\Leonardo\AppData\Roaming\Telegram Desktop\Telegram.exe"
+    E: "D:\Tools\Sublime Text\sublime.exe"
+"#;
+    let (config, fixed_lines) = winpie::config::parse_app_config(raw_yaml).expect("Auto repair Windows paths");
+    assert_eq!(fixed_lines, vec![6, 7]);
+    assert_eq!(config.get_label_for_sector(Sector::SW), "Telegram");
+    assert_eq!(
+        config.get_command_for_sector(Sector::SW),
+        Some("C:\\Users\\Leonardo\\AppData\\Roaming\\Telegram Desktop\\Telegram.exe")
+    );
+    assert_eq!(
+        config.get_command_for_sector(Sector::E),
+        Some("D:\\Tools\\Sublime Text\\sublime.exe")
+    );
+}
+
+#[test]
+fn test_yaml_unfixable_syntax_error_reports_line_and_col() {
+    let broken_yaml = "wheel:\n  slices: [unclosed list\n";
+    let res = winpie::config::parse_app_config(broken_yaml);
+    assert!(res.is_err());
+    let err = res.err().unwrap();
+    assert!(err.contains("line 2"), "Error message should contain line number: {}", err);
+}

@@ -23,6 +23,7 @@ pub const WM_WINPIE_MENU_KEYDOWN: u32 = WM_USER + 107;
 pub const WM_WINPIE_MENU_KEYUP: u32 = WM_USER + 108;
 pub const WM_WINPIE_MENU_TAB: u32 = WM_USER + 109;
 pub const WM_WINPIE_MENU_ESC: u32 = WM_USER + 110;
+pub const WM_WINPIE_MBUTTONDOWN: u32 = WM_USER + 111;
 
 pub struct InputManager {
     kbd_hook: HHOOK,

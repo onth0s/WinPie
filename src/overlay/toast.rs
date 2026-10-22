@@ -163,6 +163,30 @@ impl ToastOverlay {
         );
     }
 
+    pub fn show_multiline(
+        &self,
+        anchor: Point,
+        text: &str,
+        duration_ms: u32,
+        config: &ToastConfig,
+        theme: &ThemeConfig,
+    ) {
+        if text.is_empty() {
+            return;
+        }
+        self.show_custom(
+            anchor,
+            text,
+            config.corner,
+            config.margin_x,
+            config.margin_y,
+            config.font_size,
+            config.corner_radius.max(theme.toast_corner_radius),
+            Some(duration_ms),
+            theme,
+        );
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn show_custom(
         &self,
@@ -227,21 +251,27 @@ impl ToastOverlay {
 
             let old_font = SelectObject(measure_dc, hfont);
 
+            let is_multiline = text.contains('\n');
             let mut text_wide: Vec<u16> = OsStr::new(text).encode_wide().collect();
             let mut calc_rect = RECT::default();
+            let draw_flags = if is_multiline {
+                DT_CALCRECT | DT_NOPREFIX
+            } else {
+                DT_CALCRECT | DT_NOPREFIX | DT_SINGLELINE
+            };
             DrawTextW(
                 measure_dc,
                 &mut text_wide,
                 &mut calc_rect,
-                DT_CALCRECT | DT_NOPREFIX | DT_SINGLELINE,
+                draw_flags,
             );
 
             let text_w = calc_rect.right - calc_rect.left;
             let text_h = calc_rect.bottom - calc_rect.top;
 
-            // Padding inside toast pill: horizontal 16px on each side + 10px for accent dot, vertical 8px
+            // Padding inside toast pill: horizontal 16px on each side + 10px for accent dot, vertical 8px/12px
             let pad_x = 16;
-            let pad_y = 8;
+            let pad_y = if is_multiline { 12 } else { 8 };
             let dot_radius = 3;
             let dot_margin_right = 8;
 
@@ -347,7 +377,11 @@ impl ToastOverlay {
                 let (accent_r, accent_g, accent_b) = parse_hex_color(&theme.accent_color);
                 let accent_opacity = theme.accent_opacity.clamp(0.0, 1.0);
                 let dot_cx = (pad_x + dot_radius) as f64;
-                let dot_cy = (toast_h as f64) / 2.0;
+                let dot_cy = if is_multiline {
+                    pad_y as f64 + (font_size.abs() as f64) / 2.0
+                } else {
+                    (toast_h as f64) / 2.0
+                };
 
                 for py in 0..toast_h {
                     for px in 0..(pad_x + dot_radius * 2 + 4) {
@@ -408,9 +442,15 @@ impl ToastOverlay {
                     SetTextColor(mask_dc, COLORREF(0x00FFFFFF));
 
                     let text_left = pad_x + dot_radius * 2 + dot_margin_right;
+                    let (top_offset, draw_text_flags) = if is_multiline {
+                        (pad_y, DT_NOPREFIX)
+                    } else {
+                        (0, DT_VCENTER | DT_NOPREFIX | DT_SINGLELINE)
+                    };
+
                     let mut text_rect = RECT {
                         left: text_left,
-                        top: 0,
+                        top: top_offset,
                         right: text_left + text_w + 4,
                         bottom: toast_h,
                     };
@@ -419,7 +459,7 @@ impl ToastOverlay {
                         mask_dc,
                         &mut text_wide,
                         &mut text_rect,
-                        DT_VCENTER | DT_NOPREFIX | DT_SINGLELINE,
+                        draw_text_flags,
                     );
 
                     let mask_pixels = std::slice::from_raw_parts(mask_bits as *const u32, (toast_w * toast_h) as usize);

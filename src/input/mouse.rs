@@ -4,7 +4,9 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 
 use crate::geometry::Point;
 use super::state::*;
-use super::{WM_WINPIE_LBUTTONDOWN, WM_WINPIE_MOUSEMOVE, WM_WINPIE_RBUTTONDOWN};
+use super::{
+    WM_WINPIE_LBUTTONDOWN, WM_WINPIE_MBUTTONDOWN, WM_WINPIE_MOUSEMOVE, WM_WINPIE_RBUTTONDOWN,
+};
 
 /// Pure right-button-up swallow decision.
 ///
@@ -54,10 +56,17 @@ pub unsafe extern "system" fn ll_mouse_proc(
             return LRESULT(1);
         }
 
-        // Self-heal: a fresh, un-swallowed press invalidates any stale pair debt
-        // from a missed up, so a later real right-click can never be half-eaten.
+        // Middle-button pairing: swallow up if down was swallowed while active
+        if msg == WM_MBUTTONUP && SWALLOW_MMB_UP.swap(false, Ordering::SeqCst) {
+            return LRESULT(1);
+        }
+
+        // Self-heal: a fresh un-swallowed press invalidates any stale pair debt
         if msg == WM_RBUTTONDOWN && !(active || modal_active) {
             SWALLOW_RMB_UP.store(false, Ordering::SeqCst);
+        }
+        if msg == WM_MBUTTONDOWN && !(active || modal_active) {
+            SWALLOW_MMB_UP.store(false, Ordering::SeqCst);
         }
 
         if active || modal_active {
@@ -112,6 +121,19 @@ pub unsafe extern "system" fn ll_mouse_proc(
                         let _ = PostThreadMessageW(
                             tid,
                             WM_WINPIE_RBUTTONDOWN,
+                            WPARAM(0),
+                            LPARAM(Point::new(mouse.pt.x, mouse.pt.y).to_lparam()),
+                        );
+                    }
+                    return LRESULT(1);
+                }
+                WM_MBUTTONDOWN => {
+                    SWALLOW_MMB_UP.store(true, Ordering::SeqCst);
+                    let tid = MAIN_THREAD_ID.load(Ordering::SeqCst);
+                    if tid != 0 {
+                        let _ = PostThreadMessageW(
+                            tid,
+                            WM_WINPIE_MBUTTONDOWN,
                             WPARAM(0),
                             LPARAM(Point::new(mouse.pt.x, mouse.pt.y).to_lparam()),
                         );

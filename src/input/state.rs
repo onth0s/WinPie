@@ -25,6 +25,9 @@ pub static REQUIRE_KEY_RELEASE: AtomicBool = AtomicBool::new(false);
 // callback, so by the time the physical UP arrives the "active" guards are already false.
 pub static SWALLOW_RMB_UP: AtomicBool = AtomicBool::new(false);
 
+// Tracks swallow state for WM_MBUTTONDOWN to ensure paired WM_MBUTTONUP is swallowed
+pub static SWALLOW_MMB_UP: AtomicBool = AtomicBool::new(false);
+
 pub fn is_win_down() -> bool {
     LEFT_WIN_DOWN.load(Ordering::SeqCst) || RIGHT_WIN_DOWN.load(Ordering::SeqCst)
 }

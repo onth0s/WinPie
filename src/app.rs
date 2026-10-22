@@ -12,8 +12,8 @@ use crate::executor::execute_command_with_context;
 use crate::geometry::{GeometryConfig, Point, Sector};
 use crate::input::{
     InputManager, WM_WINPIE_ACTIVATE, WM_WINPIE_ALLKEYSUP, WM_WINPIE_LBUTTONDOWN,
-    WM_WINPIE_MENU_ESC, WM_WINPIE_MENU_KEYDOWN, WM_WINPIE_MENU_KEYUP, WM_WINPIE_MENU_TAB,
-    WM_WINPIE_MOUSEMOVE, WM_WINPIE_RBUTTONDOWN, WM_WINPIE_WINUP,
+    WM_WINPIE_MBUTTONDOWN, WM_WINPIE_MENU_ESC, WM_WINPIE_MENU_KEYDOWN, WM_WINPIE_MENU_KEYUP,
+    WM_WINPIE_MENU_TAB, WM_WINPIE_MOUSEMOVE, WM_WINPIE_RBUTTONDOWN, WM_WINPIE_WINUP,
 };
 use crate::interaction::{InteractionEffect, InteractionEvent, InteractionFsm};
 use crate::overlay::{ModalMenuOverlay, OverlayWindow, ToastOverlay};
@@ -147,6 +147,10 @@ impl Application {
                     WM_WINPIE_RBUTTONDOWN => {
                         self.handle_rbuttondown();
                     }
+                    WM_WINPIE_MBUTTONDOWN => {
+                        let pt = Point::from_lparam(msg.lParam.0);
+                        self.handle_mbuttondown(pt);
+                    }
                     WM_WINPIE_MENU_KEYDOWN => {
                         let ch = (msg.wParam.0 as u8) as char;
                         self.handle_menu_keydown(ch);
@@ -206,8 +210,15 @@ impl Application {
 
         match std::fs::read_to_string(&path) {
             Ok(content) => {
-                match serde_yaml::from_str::<AppConfig>(&content) {
-                    Ok(new_config) => {
+                match crate::config::parse_app_config(&content) {
+                    Ok((new_config, fixed_lines)) => {
+                        if !fixed_lines.is_empty() {
+                            crate::diagnostics::log_raw(&format!(
+                                "[WinPie:CONFIG] Auto-repaired unescaped Windows path(s) at line(s) {:?} in {}",
+                                fixed_lines,
+                                path.display()
+                            ));
+                        }
                         crate::diagnostics::log_raw(&format!("[WinPie] Hot-reloaded configuration from {}", path.display()));
                         self.config_last_modified = Some(current_mtime);
 
@@ -408,6 +419,57 @@ impl Application {
                 self.input_manager.set_active(false);
             }
             _ => {}
+        }
+    }
+
+    fn handle_mbuttondown(&mut self, pt: Point) {
+        if !self.fsm.is_active() && !self.fsm.is_modal_menu() {
+            return;
+        }
+
+        let anchor = match self.fsm.active_anchor() {
+            Some(a) => a,
+            None => return,
+        };
+
+        // Check if click occurred inside deadzone of wheel
+        let dx = (pt.x - anchor.x) as f64;
+        let dy = (pt.y - anchor.y) as f64;
+        let dist2 = dx * dx + dy * dy;
+        let deadzone2 = self.fsm.config.deadzone * self.fsm.config.deadzone;
+
+        if dist2 <= deadzone2 {
+            let theme = self.config.get_theme_for_profile(self.active_profile);
+
+            // Retrieve the active window context from frozen invocation or capture current
+            let (proc_name, pid, class_name, title, path) = if let Some(ref inv) = self.active_invocation {
+                (
+                    if inv.process.image_name.is_empty() { "<unknown>".to_string() } else { inv.process.image_name.clone() },
+                    inv.process.pid,
+                    if inv.window.class_name.is_empty() { "<unknown>".to_string() } else { inv.window.class_name.clone() },
+                    if inv.window.window_title.is_empty() { "<none>".to_string() } else { inv.window.window_title.clone() },
+                    if inv.process.image_path.is_empty() { "<unknown>".to_string() } else { inv.process.image_path.clone() },
+                )
+            } else {
+                let ctx = crate::context::active_window_context();
+                (
+                    if ctx.process_name.is_empty() { "<unknown>".to_string() } else { ctx.process_name },
+                    0,
+                    if ctx.window_class.is_empty() { "<unknown>".to_string() } else { ctx.window_class },
+                    if ctx.window_title.is_empty() { "<none>".to_string() } else { ctx.window_title },
+                    if ctx.process_path.is_empty() { "<unknown>".to_string() } else { ctx.process_path },
+                )
+            };
+
+            let debug_text = format!(
+                "Process : {} (PID {})\nClass   : {}\nTitle   : {}\nPath    : {}",
+                proc_name, pid, class_name, title, path
+            );
+
+            crate::diagnostics::log_raw(&format!("[WinPie:DIAGNOSTIC] Center MMB debug inspect:\n{}", debug_text));
+
+            // Display multiline toast for 6000ms
+            self.toast.show_multiline(anchor, &debug_text, 6000, &self.config.toast, theme);
         }
     }
 
