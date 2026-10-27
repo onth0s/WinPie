@@ -1,4 +1,4 @@
-use winpie::geometry::{GeometryConfig, Point, Sector};
+﻿use winpie::geometry::{GeometryConfig, Point, Sector};
 use winpie::interaction::{InteractionEffect, InteractionEvent, InteractionFsm, State};
 
 #[test]
@@ -374,3 +374,26 @@ fn test_modal_menu_mouse_hover_and_click() {
     assert_eq!(fsm.state, State::Idle);
 }
 
+
+
+#[test]
+fn test_stale_require_key_release_self_heals() {
+    use std::sync::atomic::Ordering;
+    use winpie::input::state::{REQUIRE_KEY_RELEASE, LEFT_WIN_DOWN, IS_ACTIVE};
+
+    // Simulate scenario: previous menu was dismissed while keys held -> REQUIRE_KEY_RELEASE is true
+    REQUIRE_KEY_RELEASE.store(true, Ordering::SeqCst);
+    LEFT_WIN_DOWN.store(false, Ordering::SeqCst);
+    IS_ACTIVE.store(false, Ordering::SeqCst);
+
+    // Fresh physical Win down transition resets REQUIRE_KEY_RELEASE
+    let was_held = LEFT_WIN_DOWN.swap(true, Ordering::SeqCst);
+    if !was_held && !IS_ACTIVE.load(Ordering::SeqCst) {
+        REQUIRE_KEY_RELEASE.store(false, Ordering::SeqCst);
+    }
+
+    assert!(!REQUIRE_KEY_RELEASE.load(Ordering::SeqCst), "Fresh Win key down must reset stale REQUIRE_KEY_RELEASE");
+
+    // Clean up
+    LEFT_WIN_DOWN.store(false, Ordering::SeqCst);
+}

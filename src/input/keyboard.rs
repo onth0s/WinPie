@@ -1,4 +1,4 @@
-use std::sync::atomic::Ordering;
+﻿use std::sync::atomic::Ordering;
 use windows::Win32::Foundation::{LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
@@ -37,9 +37,17 @@ pub unsafe extern "system" fn ll_keyboard_proc(
         // Track Windows modifier keys strictly on down/up transitions
         if is_down {
             if vk == VK_LWIN {
-                LEFT_WIN_DOWN.store(true, Ordering::SeqCst);
+                let was_held = LEFT_WIN_DOWN.swap(true, Ordering::SeqCst);
+                // Self-heal: A fresh physical Win down transition while inactive breaks any
+                // stale autorepeat lock from a previous interaction
+                if !was_held && !IS_ACTIVE.load(Ordering::SeqCst) && !IS_MODAL_MENU.load(Ordering::SeqCst) {
+                    REQUIRE_KEY_RELEASE.store(false, Ordering::SeqCst);
+                }
             } else if vk == VK_RWIN {
-                RIGHT_WIN_DOWN.store(true, Ordering::SeqCst);
+                let was_held = RIGHT_WIN_DOWN.swap(true, Ordering::SeqCst);
+                if !was_held && !IS_ACTIVE.load(Ordering::SeqCst) && !IS_MODAL_MENU.load(Ordering::SeqCst) {
+                    REQUIRE_KEY_RELEASE.store(false, Ordering::SeqCst);
+                }
             } else if vk == VK_ESCAPE {
                 ESCAPE_DOWN.store(true, Ordering::SeqCst);
             } else if vk == VK_SHIFT || vk == VK_LSHIFT || vk == VK_RSHIFT {

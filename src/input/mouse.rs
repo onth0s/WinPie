@@ -1,4 +1,4 @@
-use std::sync::atomic::Ordering;
+﻿use std::sync::atomic::Ordering;
 use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
 use windows::Win32::UI::WindowsAndMessaging::*;
 
@@ -62,11 +62,17 @@ pub unsafe extern "system" fn ll_mouse_proc(
         }
 
         // Self-heal: a fresh un-swallowed press invalidates any stale pair debt
+        // and clears any stale REQUIRE_KEY_RELEASE when clicking while inactive
+        if msg == WM_LBUTTONDOWN && !(active || modal_active) {
+            REQUIRE_KEY_RELEASE.store(false, Ordering::SeqCst);
+        }
         if msg == WM_RBUTTONDOWN && !(active || modal_active) {
             SWALLOW_RMB_UP.store(false, Ordering::SeqCst);
+            REQUIRE_KEY_RELEASE.store(false, Ordering::SeqCst);
         }
         if msg == WM_MBUTTONDOWN && !(active || modal_active) {
             SWALLOW_MMB_UP.store(false, Ordering::SeqCst);
+            REQUIRE_KEY_RELEASE.store(false, Ordering::SeqCst);
         }
 
         if active || modal_active {
