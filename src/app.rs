@@ -253,10 +253,13 @@ impl Application {
         self.active_profile = profile_idx;
         self.active_invocation = Some(inv);
 
-        let effect = self.fsm.transition(InteractionEvent::WinEscDown(anchor));
-        if let InteractionEffect::Activated { anchor } = effect {
-            self.diagnostics.log_activate(anchor);
-            self.overlay.show_at(anchor, None, profile_idx);
+        // Clamp anchor to active monitor work area so interaction center matches the clamped visual wheel
+        let visual_center = self.overlay.compute_clamped_center(anchor);
+
+        let effect = self.fsm.transition(InteractionEvent::WinEscDown(visual_center));
+        if let InteractionEffect::Activated { anchor: eff_anchor } = effect {
+            self.diagnostics.log_activate(eff_anchor);
+            self.overlay.show_at(eff_anchor, None, profile_idx);
         }
     }
 

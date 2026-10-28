@@ -137,6 +137,28 @@ pub fn classify_angle(theta_deg: f64, rotation_degrees: f64) -> Sector {
     Sector::from_index(idx)
 }
 
+/// Clamps a desired center point within the given monitor work area bounds
+/// such that a window of size `overlay_size` centered at the returned point fits entirely within `[work_left, work_right] x [work_top, work_bottom]`.
+pub fn clamp_center_to_bounds(center: Point, overlay_size: i32, work_left: i32, work_top: i32, work_right: i32, work_bottom: i32) -> Point {
+    let half = overlay_size / 2;
+    let mut left = center.x - half;
+    let mut top = center.y - half;
+
+    if left < work_left {
+        left = work_left;
+    } else if left + overlay_size > work_right {
+        left = work_right - overlay_size;
+    }
+
+    if top < work_top {
+        top = work_top;
+    } else if top + overlay_size > work_bottom {
+        top = work_bottom - overlay_size;
+    }
+
+    Point::new(left + half, top + half)
+}
+
 /// Evaluates hover selection.
 /// Returns None if inside deadzone (r^2 <= deadzone^2) or outside outer radius (r^2 > radius^2).
 /// Returns Some(Sector) if within valid sector ring.

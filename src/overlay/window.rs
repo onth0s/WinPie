@@ -205,12 +205,8 @@ impl OverlayWindow {
         self.profile_buffers = profile_buffers;
     }
 
-    pub fn show_at(&self, center: Point, hover: Option<Sector>, profile_idx: Option<usize>) {
-        self.active_profile_idx.set(profile_idx);
-        let half = self.size / 2;
-
+    pub fn compute_clamped_center(&self, center: Point) -> Point {
         unsafe {
-            // Clamp overlay placement within active physical monitor work area (taskbar/edge guard)
             let pt = POINT { x: center.x, y: center.y };
             let hmon = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
             let mut mi = MONITORINFO {
@@ -220,21 +216,18 @@ impl OverlayWindow {
             let _ = GetMonitorInfoW(hmon, &mut mi);
             let work = mi.rcWork;
 
-            let mut left = center.x - half;
-            let mut top = center.y - half;
+            crate::geometry::clamp_center_to_bounds(center, self.size, work.left, work.top, work.right, work.bottom)
+        }
+    }
 
-            if left < work.left {
-                left = work.left;
-            } else if left + self.size > work.right {
-                left = work.right - self.size;
-            }
+    pub fn show_at(&self, center: Point, hover: Option<Sector>, profile_idx: Option<usize>) {
+        self.active_profile_idx.set(profile_idx);
+        let half = self.size / 2;
+        let clamped_center = self.compute_clamped_center(center);
+        let left = clamped_center.x - half;
+        let top = clamped_center.y - half;
 
-            if top < work.top {
-                top = work.top;
-            } else if top + self.size > work.bottom {
-                top = work.bottom - self.size;
-            }
-
+        unsafe {
             self.blit_hover(hover);
 
             let _ = SetWindowPos(

@@ -426,3 +426,64 @@ fn test_command_node_recursive_topology_and_conversion() {
 
 
 
+
+#[test]
+fn test_clamp_center_to_bounds_within_work_area() {
+    use winpie::geometry::clamp_center_to_bounds;
+    // Overlay size 400 (half = 200). Screen 0..1920, 0..1080.
+    let center = Point::new(500, 500);
+    let clamped = clamp_center_to_bounds(center, 400, 0, 0, 1920, 1080);
+    assert_eq!(clamped, Point::new(500, 500));
+}
+
+#[test]
+fn test_clamp_center_to_bounds_screen_edges() {
+    use winpie::geometry::clamp_center_to_bounds;
+    let size = 400; // half = 200
+    let work_left = 0;
+    let work_top = 0;
+    let work_right = 1920;
+    let work_bottom = 1080;
+
+    // Top-left corner (0, 0)
+    let clamped_tl = clamp_center_to_bounds(Point::new(0, 0), size, work_left, work_top, work_right, work_bottom);
+    assert_eq!(clamped_tl, Point::new(200, 200));
+
+    // Bottom-right corner (1920, 1080)
+    let clamped_br = clamp_center_to_bounds(Point::new(1920, 1080), size, work_left, work_top, work_right, work_bottom);
+    assert_eq!(clamped_br, Point::new(1720, 880));
+
+    // Negative coordinates (multi-monitor scenario: e.g. secondary monitor left at -1920..0)
+    let clamped_neg = clamp_center_to_bounds(Point::new(-1920, 0), size, -1920, 0, 0, 1080);
+    assert_eq!(clamped_neg, Point::new(-1720, 200));
+}
+
+#[test]
+fn test_edge_invocation_hover_alignment_with_clamped_center() {
+    use winpie::geometry::clamp_center_to_bounds;
+    let config = GeometryConfig {
+        radius: 180.0,
+        deadzone: 32.0,
+        rotation_degrees: 0.0,
+        slices: 8,
+    };
+    let overlay_size = 400; // (180 + 20) * 2
+
+    // Summon at top-left corner (10, 10) on a 1920x1080 screen
+    let raw_cursor = Point::new(10, 10);
+    let clamped_center = clamp_center_to_bounds(raw_cursor, overlay_size, 0, 0, 1920, 1080);
+    assert_eq!(clamped_center, Point::new(200, 200));
+
+    // A mouse position at (200, 100) is physically directly North (dy = -100) of the visual wheel center (200, 200).
+    // If evaluated with raw_cursor (10, 10), (200, 100) would be dx=190, dy=90 which is SE, totally wrong!
+    // With clamped_center:
+    let hover_sector = evaluate_hover(clamped_center, Point::new(200, 100), &config);
+    assert_eq!(hover_sector, Some(Sector::N));
+
+    // Also verify commit evaluation matches
+    let commit = evaluate_commit(clamped_center, Point::new(200, 100), &config);
+    assert_eq!(commit, Resolution::Commit(Sector::N));
+
+    // Cursor right at visual center is in deadzone
+    assert_eq!(evaluate_hover(clamped_center, clamped_center, &config), None);
+}
