@@ -238,3 +238,16 @@ fn test_yaml_unfixable_syntax_error_reports_line_and_col() {
     let err = res.err().unwrap();
     assert!(err.contains("line 2"), "Error message should contain line number: {}", err);
 }
+
+#[test]
+fn test_yaml_misplaced_submenu_hint() {
+    let broken_yaml = "wheel:\n  commands:\n    S:\n      title: \"Settings 2\"\n      items:\n        s:\n          label: \"Volume Mixer\"\n          command: \"start ms-settings:apps-volume\"\n";
+    let res = winpie::config::parse_app_config(broken_yaml);
+    assert!(res.is_err());
+    let err = res.err().unwrap();
+    assert!(
+        err.contains("wheel.menus"),
+        "Error hint should mention wheel.menus: {}",
+        err
+    );
+}

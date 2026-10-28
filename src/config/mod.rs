@@ -837,6 +837,16 @@ pub fn parse_app_config(content: &str) -> Result<(AppConfig, Vec<usize>), String
                 );
             }
 
+            // Provide an actionable hint for the common mistake of placing a submenu
+            // mapping under `wheel.commands` (which only accepts command strings).
+            if err_str.contains("invalid type: map, expected a string") && err_str.contains("commands") {
+                msg.push_str(
+                    "\nHint: wheel.commands entries must be command strings (for example \"control.exe\"). \
+                     If this block defines a submenu with title/tooltip/items, move it under wheel.menus.<sector> instead. \
+                     See config.example.yaml for the canonical layout.",
+                );
+            }
+
             Err(msg)
         }
     }
