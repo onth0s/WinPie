@@ -245,6 +245,8 @@ pub struct ProfileConfig {
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct AppConfig {
     #[serde(default)]
+    pub daemon: DaemonConfig,
+    #[serde(default)]
     pub activation: ActivationConfig,
     #[serde(default)]
     pub overlay: OverlayConfig,
@@ -266,6 +268,17 @@ pub struct AppConfig {
     pub profiles: Vec<ProfileConfig>,
 }
 
+
+/// Daemon process behaviour configuration.
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct DaemonConfig {
+    /// When true, WinPie re-launches itself with Administrator privileges
+    /// on startup (Windows ShellExecute runas verb). Allows the low-level
+    /// keyboard hook to fire even when elevated windows (Task Manager,
+    /// elevated terminals, etc.) have foreground focus. Default: false.
+    #[serde(default)]
+    pub run_as_admin: bool,
+}
 #[derive(Debug, Clone, Deserialize)]
 pub struct ActivationConfig {
     #[serde(default = "default_modifier")]

@@ -397,3 +397,21 @@ fn test_stale_require_key_release_self_heals() {
     // Clean up
     LEFT_WIN_DOWN.store(false, Ordering::SeqCst);
 }
+#[test]
+fn test_ghost_win_state_does_not_block_require_release_reset() {
+    use std::sync::atomic::Ordering;
+    use winpie::input::state::{REQUIRE_KEY_RELEASE, LEFT_WIN_DOWN, IS_ACTIVE, IS_MODAL_MENU};
+
+    LEFT_WIN_DOWN.store(true, Ordering::SeqCst);
+    REQUIRE_KEY_RELEASE.store(true, Ordering::SeqCst);
+    IS_ACTIVE.store(false, Ordering::SeqCst);
+    IS_MODAL_MENU.store(false, Ordering::SeqCst);
+
+    LEFT_WIN_DOWN.store(true, Ordering::SeqCst);
+    if !IS_ACTIVE.load(Ordering::SeqCst) && !IS_MODAL_MENU.load(Ordering::SeqCst) {
+        REQUIRE_KEY_RELEASE.store(false, Ordering::SeqCst);
+    }
+
+    assert!(!REQUIRE_KEY_RELEASE.load(Ordering::SeqCst));
+    LEFT_WIN_DOWN.store(false, Ordering::SeqCst);
+}

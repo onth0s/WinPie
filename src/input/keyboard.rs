@@ -37,15 +37,16 @@ pub unsafe extern "system" fn ll_keyboard_proc(
         // Track Windows modifier keys strictly on down/up transitions
         if is_down {
             if vk == VK_LWIN {
-                let was_held = LEFT_WIN_DOWN.swap(true, Ordering::SeqCst);
-                // Self-heal: A fresh physical Win down transition while inactive breaks any
-                // stale autorepeat lock from a previous interaction
-                if !was_held && !IS_ACTIVE.load(Ordering::SeqCst) && !IS_MODAL_MENU.load(Ordering::SeqCst) {
+                LEFT_WIN_DOWN.store(true, Ordering::SeqCst);
+                // Self-heal: A physical Win down transition while inactive breaks any
+                // stale autorepeat lock from a previous interaction (even if a dropped
+                // keyup from Task View/Win+Tab had left LEFT_WIN_DOWN true)
+                if !IS_ACTIVE.load(Ordering::SeqCst) && !IS_MODAL_MENU.load(Ordering::SeqCst) {
                     REQUIRE_KEY_RELEASE.store(false, Ordering::SeqCst);
                 }
             } else if vk == VK_RWIN {
-                let was_held = RIGHT_WIN_DOWN.swap(true, Ordering::SeqCst);
-                if !was_held && !IS_ACTIVE.load(Ordering::SeqCst) && !IS_MODAL_MENU.load(Ordering::SeqCst) {
+                RIGHT_WIN_DOWN.store(true, Ordering::SeqCst);
+                if !IS_ACTIVE.load(Ordering::SeqCst) && !IS_MODAL_MENU.load(Ordering::SeqCst) {
                     REQUIRE_KEY_RELEASE.store(false, Ordering::SeqCst);
                 }
             } else if vk == VK_ESCAPE {
@@ -65,8 +66,31 @@ pub unsafe extern "system" fn ll_keyboard_proc(
             }
         }
 
-        let win_held = is_win_down();
-        let esc_held = is_escape_down();
+        let mut win_held = is_win_down();
+        let mut esc_held = is_escape_down();
+
+        // Self-heal ghost key states: When the Windows Shell (e.g., Task View Win+Tab or
+        // virtual desktop switch) consumes a physical WM_KEYUP, low-level hooks never receive it.
+        // If WinPie is idle and our atomic flags report Win or Esc as held, verify their physical
+        // hardware state using GetAsyncKeyState (only when NOT processing that key's own transition).
+        if !IS_ACTIVE.load(Ordering::SeqCst) && !IS_MODAL_MENU.load(Ordering::SeqCst) {
+            if win_held && vk != VK_LWIN && vk != VK_RWIN {
+                let phys_lwin = (GetAsyncKeyState(VK_LWIN.0 as i32) as u16 & 0x8000) != 0;
+                let phys_rwin = (GetAsyncKeyState(VK_RWIN.0 as i32) as u16 & 0x8000) != 0;
+                if !phys_lwin && !phys_rwin {
+                    LEFT_WIN_DOWN.store(false, Ordering::SeqCst);
+                    RIGHT_WIN_DOWN.store(false, Ordering::SeqCst);
+                    win_held = false;
+                }
+            }
+            if esc_held && vk != VK_ESCAPE {
+                let phys_esc = (GetAsyncKeyState(VK_ESCAPE.0 as i32) as u16 & 0x8000) != 0;
+                if !phys_esc {
+                    ESCAPE_DOWN.store(false, Ordering::SeqCst);
+                    esc_held = false;
+                }
+            }
+        }
 
         // Clear WAIT_RELEASE once all activation keys have been physically released
         if is_up

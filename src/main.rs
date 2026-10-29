@@ -124,7 +124,78 @@ fn run_debug_tail() -> Result<(), Box<dyn std::error::Error>> {
     }
 }
 
+/// Returns true if the current process token has the Administrator role (High Integrity).
+fn is_elevated() -> bool {
+    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::Security::{GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY};
+    use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+    unsafe {
+        let mut token = HANDLE::default();
+        if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token).is_ok() {
+            let mut elevation = TOKEN_ELEVATION::default();
+            let mut ret_len = 0u32;
+            let size = std::mem::size_of::<TOKEN_ELEVATION>() as u32;
+            if GetTokenInformation(
+                token,
+                TokenElevation,
+                Some(&mut elevation as *mut _ as *mut _),
+                size,
+                &mut ret_len,
+            ).is_ok() {
+                return elevation.TokenIsElevated != 0;
+            }
+        }
+    }
+    false
+}
+
+/// Re-launches winpie as Administrator via ShellExecute runas verb.
+/// Returns Ok(()) after handing off to the elevated process; the caller should exit.
+fn relaunch_elevated() -> Result<(), Box<dyn std::error::Error>> {
+    use std::ffi::OsStr;
+    use std::os::windows::ffi::OsStrExt;
+    use windows::Win32::UI::Shell::ShellExecuteW;
+    use windows::Win32::UI::WindowsAndMessaging::SW_HIDE;
+
+    let current_exe = std::env::current_exe()?;
+    let exe_wide: Vec<u16> = OsStr::new(&current_exe)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    let verb: Vec<u16> = OsStr::new("runas")
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    let args: Vec<u16> = OsStr::new("--daemon")
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+
+    unsafe {
+        use windows::core::PCWSTR;
+        let result = ShellExecuteW(
+            None,
+            PCWSTR(verb.as_ptr()),
+            PCWSTR(exe_wide.as_ptr()),
+            PCWSTR(args.as_ptr()),
+            None,
+            SW_HIDE,
+        );
+        // ShellExecuteW returns a value > 32 on success
+        if result.0 as usize <= 32 {
+            return Err(format!("ShellExecuteW runas failed with code {}", result.0 as usize).into());
+        }
+    }
+    Ok(())
+}
+
 fn spawn_detached_daemon() -> Result<(), Box<dyn std::error::Error>> {
+    // Check if run_as_admin is requested in config and we are not already elevated
+    let (config, _) = winpie::config::AppConfig::discover_and_load();
+    if config.daemon.run_as_admin && !is_elevated() {
+        return relaunch_elevated();
+    }
+
     let current_exe = std::env::current_exe()?;
     let mut cmd = std::process::Command::new(current_exe);
     cmd.arg("--daemon")
@@ -217,6 +288,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 return run_debug_tail();
             }
             "--daemon" => {
+                // When running as daemon, detach from any console window so no terminal window stays open
+                unsafe {
+                    let _ = windows::Win32::System::Console::FreeConsole();
+                }
+
                 // Background daemon execution loop (spawned detached)
                 let _mutex_handle = match winpie::ipc::try_acquire_singleton() {
                     Some(handle) => handle,

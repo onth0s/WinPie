@@ -14,6 +14,9 @@ fn test_config_example_yaml_integrity_and_full_specification() {
     let content = fs::read_to_string(example_path).expect("Read config.example.yaml");
     let config: AppConfig = serde_yaml::from_str(&content).expect("Parse config.example.yaml");
 
+    // 0. Daemon
+    assert!(!config.daemon.run_as_admin);
+
     // 1. Activation
     assert_eq!(config.activation.modifier, "win");
     assert_eq!(config.activation.trigger, "escape");

@@ -9,6 +9,16 @@
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
+# 0. Daemon Process Settings
+# ------------------------------------------------------------------------------
+daemon:
+  # When true, WinPie will re-launch itself with Administrator privileges on startup
+  # (via Windows UAC "runas" prompt). This allows the low-level keyboard hook to
+  # intercept Win+Esc even when elevated windows (Task Manager, elevated terminals,
+  # Registry Editor, etc.) have foreground focus. (default: false)
+  run_as_admin: false
+
+# ------------------------------------------------------------------------------
 # 1. Activation Hotkey & Modifiers
 # ------------------------------------------------------------------------------
 activation:
