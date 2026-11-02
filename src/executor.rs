@@ -1,4 +1,5 @@
 use std::io;
+use std::process::Stdio;
 use crate::context::InvocationContext;
 
 /// Executes an arbitrary system command or script asynchronously and detached,
@@ -54,6 +55,12 @@ pub fn execute_command_with_context(
             c
         };
 
+        // Disconnect standard streams to prevent inheriting invalid console handles after FreeConsole()
+        // (Inheriting detached console handles causes Windows CreateProcess to fail with OS error 50: The request is not supported)
+        cmd.stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+
         cmd.creation_flags(CREATE_NO_WINDOW);
 
         // Inject contextual environment variables from frozen snapshot
@@ -87,6 +94,9 @@ pub fn execute_command_with_context(
     {
         let mut cmd = std::process::Command::new("sh");
         cmd.arg("-c").arg(clean);
+        cmd.stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
         if let Some(ctx) = context {
             cmd.env("WINPIE_CONTEXT_PROCESS_NAME", &ctx.process.image_name);
             cmd.env("WINPIE_CONTEXT_WINDOW_TITLE", &ctx.window.window_title);

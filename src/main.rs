@@ -234,6 +234,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                 if winpie::ipc::is_running() {
                     let _ = winpie::ipc::signal_kill();
+                    // Wait up to 2 seconds for previous process to release singleton mutex
+                    for _ in 0..20 {
+                        if !winpie::ipc::is_running() {
+                            break;
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(100));
+                    }
                 }
                 spawn_detached_daemon()?;
 

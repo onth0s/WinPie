@@ -52,6 +52,11 @@ impl ControlWindow {
                 None,
             )?;
 
+            // Allow non-elevated (Medium Integrity) processes to send termination messages across UIPI
+            // even when WinPie runs elevated as Administrator (High Integrity).
+            let _ = ChangeWindowMessageFilterEx(hwnd, WM_CLOSE, MSGFLT_ALLOW, None);
+            let _ = ChangeWindowMessageFilterEx(hwnd, WM_WINPIE_CONTROL_KILL, MSGFLT_ALLOW, None);
+
             Ok(Self { hwnd })
         }
     }
@@ -135,6 +140,7 @@ pub fn signal_kill() -> bool {
         let hwnd = FindWindowW(CONTROL_WINDOW_CLASS, CONTROL_WINDOW_TITLE);
         if let Ok(h) = hwnd {
             if !h.0.is_null() {
+                let _ = PostMessageW(h, WM_WINPIE_CONTROL_KILL, WPARAM(0), LPARAM(0));
                 let _ = PostMessageW(h, WM_CLOSE, WPARAM(0), LPARAM(0));
                 found = true;
             }
