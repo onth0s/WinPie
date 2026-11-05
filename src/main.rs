@@ -151,7 +151,7 @@ fn is_elevated() -> bool {
 
 /// Re-launches winpie as Administrator via ShellExecute runas verb.
 /// Returns Ok(()) after handing off to the elevated process; the caller should exit.
-fn relaunch_elevated() -> Result<(), Box<dyn std::error::Error>> {
+fn relaunch_elevated(config_path: Option<&std::path::Path>) -> Result<(), Box<dyn std::error::Error>> {
     use std::ffi::OsStr;
     use std::os::windows::ffi::OsStrExt;
     use windows::Win32::UI::Shell::ShellExecuteW;
@@ -166,19 +166,41 @@ fn relaunch_elevated() -> Result<(), Box<dyn std::error::Error>> {
         .encode_wide()
         .chain(std::iter::once(0))
         .collect();
-    let args: Vec<u16> = OsStr::new("--daemon")
+
+    let mut args_str = String::from("--daemon");
+    if let Some(cp) = config_path {
+        args_str.push_str(" --config \"");
+        args_str.push_str(&cp.to_string_lossy());
+        args_str.push('"');
+    }
+
+    let args_wide: Vec<u16> = OsStr::new(&args_str)
         .encode_wide()
         .chain(std::iter::once(0))
         .collect();
 
+    // Preserve the current working directory across elevation so relative paths resolve accurately
+    let cwd = std::env::current_dir().ok();
+    let cwd_wide: Option<Vec<u16>> = cwd.as_ref().map(|d| {
+        OsStr::new(d)
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect()
+    });
+
     unsafe {
         use windows::core::PCWSTR;
+        let cwd_ptr = match &cwd_wide {
+            Some(w) => PCWSTR(w.as_ptr()),
+            None => PCWSTR::null(),
+        };
+
         let result = ShellExecuteW(
             None,
             PCWSTR(verb.as_ptr()),
             PCWSTR(exe_wide.as_ptr()),
-            PCWSTR(args.as_ptr()),
-            None,
+            PCWSTR(args_wide.as_ptr()),
+            cwd_ptr,
             SW_HIDE,
         );
         // ShellExecuteW returns a value > 32 on success
@@ -191,15 +213,18 @@ fn relaunch_elevated() -> Result<(), Box<dyn std::error::Error>> {
 
 fn spawn_detached_daemon() -> Result<(), Box<dyn std::error::Error>> {
     // Check if run_as_admin is requested in config and we are not already elevated
-    let (config, _) = winpie::config::AppConfig::discover_and_load();
+    let (config, config_path) = winpie::config::AppConfig::discover_and_load();
     if config.daemon.run_as_admin && !is_elevated() {
-        return relaunch_elevated();
+        return relaunch_elevated(config_path.as_deref());
     }
 
     let current_exe = std::env::current_exe()?;
     let mut cmd = std::process::Command::new(current_exe);
-    cmd.arg("--daemon")
-        .creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS);
+    cmd.arg("--daemon");
+    if let Some(ref cp) = config_path {
+        cmd.arg("--config").arg(cp);
+    }
+    cmd.creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS);
 
     if let Ok(cwd) = std::env::current_dir() {
         cmd.current_dir(cwd);
@@ -209,8 +234,18 @@ fn spawn_detached_daemon() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let args: Vec<String> = std::env::args().collect();
+    let mut args: Vec<String> = std::env::args().collect();
+
+    // Check for --config <path> flag and set explicit override
+    if let Some(pos) = args.iter().position(|a| a == "--config") {
+        if pos + 1 < args.len() {
+            let config_path = std::path::PathBuf::from(&args[pos + 1]);
+            winpie::config::set_override_config_path(config_path);
+            args.drain(pos..=pos + 1);
+        }
+    }
 
     if args.len() > 1 {
         match args[1].as_str() {

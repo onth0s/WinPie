@@ -2,7 +2,8 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::time::Duration;
 use windows::Win32::Foundation::{ERROR_ALREADY_EXISTS, GetLastError, HANDLE, HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
-use windows::Win32::System::Threading::CreateMutexW;
+use windows::Win32::System::StationsAndDesktops::{CloseDesktop, GetThreadDesktop, OpenDesktopW, SetThreadDesktop, DESKTOP_CONTROL_FLAGS};
+use windows::Win32::System::Threading::{CreateMutexW, GetCurrentThreadId};
 use windows::Win32::UI::WindowsAndMessaging::*;
 
 pub const CONTROL_WINDOW_CLASS: windows::core::PCWSTR = windows::core::w!("WinPieControlWindowClass");
@@ -95,15 +96,47 @@ unsafe extern "system" fn control_wndproc(
     }
 }
 
-/// Checks if an instance of WinPie is already active.
-pub fn is_running() -> bool {
+/// Finds the HWND of the WinPie Control Window across current and interactive default desktops.
+pub fn find_control_window() -> Option<HWND> {
     unsafe {
-        let hwnd = FindWindowW(CONTROL_WINDOW_CLASS, CONTROL_WINDOW_TITLE);
-        if let Ok(h) = hwnd {
+        // 1. Check current thread desktop
+        if let Ok(h) = FindWindowW(CONTROL_WINDOW_CLASS, CONTROL_WINDOW_TITLE) {
             if !h.0.is_null() {
-                return true;
+                return Some(h);
             }
         }
+
+        // 2. If not found on current thread desktop (e.g. running in sandbox or service),
+        // query the interactive "default" desktop
+        let default_name = windows::core::w!("default");
+        if let Ok(hdesk) = OpenDesktopW(default_name, DESKTOP_CONTROL_FLAGS(0), false, 0x01ff) {
+            let orig_desk = GetThreadDesktop(GetCurrentThreadId()).ok();
+            if SetThreadDesktop(hdesk).is_ok() {
+                let res = if let Ok(h) = FindWindowW(CONTROL_WINDOW_CLASS, CONTROL_WINDOW_TITLE) {
+                    if !h.0.is_null() {
+                        Some(h)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                if let Some(orig) = orig_desk {
+                    let _ = SetThreadDesktop(orig);
+                }
+                let _ = CloseDesktop(hdesk);
+                return res;
+            }
+            let _ = CloseDesktop(hdesk);
+        }
+    }
+    None
+}
+
+/// Checks if an instance of WinPie is already active.
+pub fn is_running() -> bool {
+    if find_control_window().is_some() {
+        return true;
     }
     // Check if the singleton mutex is held by another process
     try_acquire_singleton().is_none()
@@ -136,15 +169,12 @@ pub fn try_acquire_singleton() -> Option<HANDLE> {
 /// Waits up to 2 seconds for clean exit.
 pub fn signal_kill() -> bool {
     let mut found = false;
-    unsafe {
-        let hwnd = FindWindowW(CONTROL_WINDOW_CLASS, CONTROL_WINDOW_TITLE);
-        if let Ok(h) = hwnd {
-            if !h.0.is_null() {
-                let _ = PostMessageW(h, WM_WINPIE_CONTROL_KILL, WPARAM(0), LPARAM(0));
-                let _ = PostMessageW(h, WM_CLOSE, WPARAM(0), LPARAM(0));
-                found = true;
-            }
+    if let Some(h) = find_control_window() {
+        unsafe {
+            let _ = PostMessageW(h, WM_WINPIE_CONTROL_KILL, WPARAM(0), LPARAM(0));
+            let _ = PostMessageW(h, WM_CLOSE, WPARAM(0), LPARAM(0));
         }
+        found = true;
     }
 
     if found {

@@ -46,11 +46,21 @@ if ($All) {
 $startTime = [System.Diagnostics.Stopwatch]::StartNew()
 $mode = if ($Release) { "Release" } else { "Debug" }
 
-# 0. Kill any running WinPie process before building/copying
+# 0. Clean up stale binaries and kill any running WinPie process before building/copying
+$staleOld = Join-Path $env:USERPROFILE ".cargo\bin\winpie.exe.old"
+if (Test-Path $staleOld) {
+    Remove-Item -Path $staleOld -Force -ErrorAction SilentlyContinue
+}
+
 $running = Get-Process -Name winpie -ErrorAction SilentlyContinue
 if ($running) {
     Write-Host "[KILL] Terminating existing WinPie process(es)..." -ForegroundColor Yellow
-    $running | Stop-Process -Force -ErrorAction SilentlyContinue
+    $cargoBinExe = Join-Path $env:USERPROFILE ".cargo\bin\winpie.exe"
+    if (Test-Path $cargoBinExe) {
+        & $cargoBinExe kill 2>&1 | Out-Null
+    }
+    Start-Sleep -Milliseconds 200
+    Get-Process -Name winpie -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
     Start-Sleep -Milliseconds 200
 }
 
@@ -140,11 +150,30 @@ if (Test-Path $exePath) {
     Write-Host "[INFO]    Binary Size: $sizeMb MB ($sizeKb KB)" -ForegroundColor DarkCyan
 
     # 5. Sync to PATH (.cargo\bin) for all builds; maintain Windows Startup Shortcut
+    $appDataWinPie = Join-Path $env:APPDATA "WinPie"
+    if (-not (Test-Path $appDataWinPie)) {
+        New-Item -ItemType Directory -Path $appDataWinPie -Force | Out-Null
+    }
+    if (Test-Path "config.yaml") {
+        Copy-Item -Path "config.yaml" -Destination (Join-Path $appDataWinPie "config.yaml") -Force
+        Write-Host "[CONFIG]  Synced config.yaml -> $appDataWinPie\config.yaml" -ForegroundColor Green
+    }
+
     $cargoBin = Join-Path $env:USERPROFILE ".cargo\bin"
     $canonicalExe = $exePath
     if (Test-Path $cargoBin) {
         $destPath = Join-Path $cargoBin "winpie.exe"
-        Copy-Item -Path $exePath -Destination $destPath -Force
+        try {
+            Copy-Item -Path $exePath -Destination $destPath -Force -ErrorAction Stop
+        } catch {
+            Write-Host "[PATH]    Destination locked by running process; renaming and replacing..." -ForegroundColor Yellow
+            $destOld = "$destPath.old"
+            if (Test-Path $destOld) {
+                Remove-Item -Path $destOld -Force -ErrorAction SilentlyContinue
+            }
+            Move-Item -Path $destPath -Destination $destOld -Force -ErrorAction SilentlyContinue
+            Copy-Item -Path $exePath -Destination $destPath -Force
+        }
         Write-Host "[PATH]    Synced to $destPath (Run 'winpie' from any terminal)" -ForegroundColor Green
         $canonicalExe = $destPath
     }

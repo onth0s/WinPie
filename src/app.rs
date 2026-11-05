@@ -234,7 +234,16 @@ impl Application {
                         self.config = new_config;
                     }
                     Err(e) => {
-                        crate::diagnostics::log_raw(&format!("[WinPie] Warning: Failed to parse updated {}: {}", path.display(), e));
+                        let warn_msg = format!("[WinPie] Config Error: {}", e);
+                        crate::diagnostics::log_raw(&warn_msg);
+                        // Display prominent HUD warning toast on screen so user knows why config was kept
+                        let mut pt = windows::Win32::Foundation::POINT::default();
+                        let _ = unsafe { windows::Win32::UI::WindowsAndMessaging::GetCursorPos(&mut pt) };
+                        let anchor = Point::new(pt.x, pt.y);
+                        let mut err_toast_cfg = self.config.toast.clone();
+                        err_toast_cfg.duration_ms = 4000;
+                        let theme = self.config.get_theme_for_profile(self.active_profile);
+                        self.toast.show(anchor, &format!("Config syntax error: {}", e), &err_toast_cfg, theme);
                     }
                 }
             }
