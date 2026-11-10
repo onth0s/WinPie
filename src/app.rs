@@ -85,6 +85,7 @@ impl Application {
         }
 
         let input_manager = InputManager::install(thread_id)?;
+        input_manager.apply_config(&config.activation);
 
         Ok(Self {
             config,
@@ -110,73 +111,76 @@ impl Application {
             let mut pt = windows::Win32::Foundation::POINT::default();
             let _ = unsafe { windows::Win32::UI::WindowsAndMessaging::GetCursorPos(&mut pt) };
             let anchor = Point::new(pt.x, pt.y);
-            let toast_cfg = crate::config::ToastConfig {
-                enabled: true,
-                show_hover_tooltips: true,
-                duration_ms: self.config.startup_toast.duration_ms,
-                corner: self.config.startup_toast.corner,
-                margin_x: self.config.startup_toast.margin_x,
-                margin_y: self.config.startup_toast.margin_y,
-                font_size: self.config.startup_toast.font_size,
-                corner_radius: self.config.startup_toast.corner_radius,
-                show_sector_direction: false,
-            };
-            self.toast.show(anchor, &self.config.startup_toast.text, &toast_cfg, &self.config.theme);
+            self.toast.show_startup(anchor, &self.config.startup_toast, &self.config.theme);
         }
 
         unsafe {
             let mut msg = MSG::default();
             while GetMessageW(&mut msg, None, 0, 0).as_bool() {
-                match msg.message {
-                    WM_WINPIE_ACTIVATE => {
-                        let pt = Point::from_lparam(msg.lParam.0);
-                        self.handle_activate(pt);
-                    }
-                    WM_WINPIE_MOUSEMOVE => {
-                        let pt = Point::from_lparam(msg.lParam.0);
-                        self.handle_mousemove(pt);
-                    }
-                    WM_WINPIE_LBUTTONDOWN => {
-                        let pt = Point::from_lparam(msg.lParam.0);
-                        self.handle_lbuttondown(pt);
-                    }
-                    WM_WINPIE_WINUP => {
-                        let pt = Point::from_lparam(msg.lParam.0);
-                        self.handle_winup(pt);
-                    }
-                    WM_WINPIE_RBUTTONDOWN => {
-                        self.handle_rbuttondown();
-                    }
-                    WM_WINPIE_MBUTTONDOWN => {
-                        let pt = Point::from_lparam(msg.lParam.0);
-                        self.handle_mbuttondown(pt);
-                    }
-                    WM_WINPIE_MENU_KEYDOWN => {
-                        let ch = (msg.wParam.0 as u8) as char;
-                        self.handle_menu_keydown(ch);
-                    }
-                    WM_WINPIE_MENU_KEYUP => {
-                        let ch = (msg.wParam.0 as u8) as char;
-                        self.handle_menu_keyup(ch);
-                    }
-                    WM_WINPIE_MENU_TAB => {
-                        let shift = msg.wParam.0 != 0;
-                        self.handle_menu_tab(shift);
-                    }
-                    WM_WINPIE_MENU_ESC => {
-                        self.handle_menu_esc();
-                    }
-                    WM_WINPIE_ALLKEYSUP => {
-                        self.handle_allkeysup();
-                    }
-                    WM_QUIT => {
-                        break;
-                    }
-                    _ => {
-                        let _ = TranslateMessage(&msg);
-                        DispatchMessageW(&msg);
+                if msg.hwnd.0.is_null() {
+                    match msg.message {
+                        WM_WINPIE_ACTIVATE => {
+                            let pt = Point::from_lparam(msg.lParam.0);
+                            self.handle_activate(pt);
+                            continue;
+                        }
+                        WM_WINPIE_MOUSEMOVE => {
+                            let pt = Point::from_lparam(msg.lParam.0);
+                            self.handle_mousemove(pt);
+                            continue;
+                        }
+                        WM_WINPIE_LBUTTONDOWN => {
+                            let pt = Point::from_lparam(msg.lParam.0);
+                            self.handle_lbuttondown(pt);
+                            continue;
+                        }
+                        WM_WINPIE_WINUP => {
+                            let pt = Point::from_lparam(msg.lParam.0);
+                            self.handle_winup(pt);
+                            continue;
+                        }
+                        WM_WINPIE_RBUTTONDOWN => {
+                            self.handle_rbuttondown();
+                            continue;
+                        }
+                        WM_WINPIE_MBUTTONDOWN => {
+                            let pt = Point::from_lparam(msg.lParam.0);
+                            self.handle_mbuttondown(pt);
+                            continue;
+                        }
+                        WM_WINPIE_MENU_KEYDOWN => {
+                            let ch = (msg.wParam.0 as u8) as char;
+                            self.handle_menu_keydown(ch);
+                            continue;
+                        }
+                        WM_WINPIE_MENU_KEYUP => {
+                            let ch = (msg.wParam.0 as u8) as char;
+                            self.handle_menu_keyup(ch);
+                            continue;
+                        }
+                        WM_WINPIE_MENU_TAB => {
+                            let shift = msg.wParam.0 != 0;
+                            self.handle_menu_tab(shift);
+                            continue;
+                        }
+                        WM_WINPIE_MENU_ESC => {
+                            self.handle_menu_esc();
+                            continue;
+                        }
+                        WM_WINPIE_ALLKEYSUP => {
+                            self.handle_allkeysup();
+                            continue;
+                        }
+                        _ => {}
                     }
                 }
+
+                if msg.message == WM_QUIT {
+                    break;
+                }
+
+                let _ = TranslateMessage(&msg);
+                DispatchMessageW(&msg);
             }
         }
 
@@ -229,6 +233,7 @@ impl Application {
                             slices: new_config.wheel.slices,
                         };
                         self.fsm.config = geom_config;
+                        self.input_manager.apply_config(&new_config.activation);
                         self.overlay.reload_config(&new_config);
                         self.diagnostics = Diagnostics::new(new_config.diagnostics.clone());
                         self.config = new_config;
@@ -260,16 +265,29 @@ impl Application {
         let inv = crate::context::capture_invocation_context(anchor);
         let profile_idx = self.config.find_matching_profile_for_invocation(&inv);
         self.active_profile = profile_idx;
+
+        // Clamp anchor to active monitor work area (using work area from invocation snapshot to avoid redundant monitor query)
+        let visual_center = crate::geometry::clamp_center_to_bounds(
+            anchor,
+            self.overlay.size(),
+            inv.monitor.work_area[0],
+            inv.monitor.work_area[1],
+            inv.monitor.work_area[2],
+            inv.monitor.work_area[3],
+        );
         self.active_invocation = Some(inv);
 
-        // Clamp anchor to active monitor work area so interaction center matches the clamped visual wheel
-        let visual_center = self.overlay.compute_clamped_center(anchor);
-
         let effect = self.fsm.transition(InteractionEvent::WinEscDown(visual_center));
+        self.sync_input_state();
         if let InteractionEffect::Activated { anchor: eff_anchor } = effect {
             self.diagnostics.log_activate(eff_anchor);
             self.overlay.show_at(eff_anchor, None, profile_idx);
         }
+    }
+
+    fn sync_input_state(&self) {
+        self.input_manager.set_active(self.fsm.is_active());
+        self.input_manager.set_modal_menu(self.fsm.is_modal_menu());
     }
 
     fn handle_mousemove(&mut self, pt: Point) {
@@ -281,6 +299,7 @@ impl Application {
                 let hit = self.modal_menu.hit_test(pt, anchor, nav_stack);
                 let hit_key = hit.as_ref().map(|(k, _)| *k);
                 let effect = self.fsm.transition(InteractionEvent::MenuHover(hit_key));
+                self.sync_input_state();
 
                 if let InteractionEffect::MenuHighlightChanged { key, item } = effect {
                     if let Some(stack) = self.fsm.menu_nav_stack() {
@@ -301,6 +320,7 @@ impl Application {
         }
 
         let effect = self.fsm.transition(InteractionEvent::MouseMove(pt));
+        self.sync_input_state();
         if let InteractionEffect::HoverChanged { to, .. } = effect {
             self.diagnostics.log_hover(to);
             self.overlay.update_hover(to);
@@ -327,14 +347,12 @@ impl Application {
         self.toast.hide();
 
         // Check if this sector spawns a submenu
-        if let Some(menu) = self.config.get_menu_for_sector_with_profile(sector, profile_idx).cloned() {
-            self.input_manager.set_active(false);
-            self.input_manager.set_modal_menu(true);
-
+        if let Some(menu) = self.config.get_menu_for_sector_with_profile(sector, profile_idx) {
             let effect = self.fsm.transition(InteractionEvent::MenuSpawn {
                 anchor,
                 menu: menu.clone(),
             });
+            self.sync_input_state();
 
             if let InteractionEffect::MenuSpawned { anchor, menu } = effect {
                 self.modal_menu.show(anchor, &[menu], None, theme);
@@ -344,7 +362,7 @@ impl Application {
         }
 
         // Otherwise direct command execution
-        self.input_manager.set_active(false);
+        self.sync_input_state();
 
         let label = self.config.get_label_for_sector_with_profile(sector, profile_idx);
         let text = if self.config.toast.show_sector_direction {
@@ -371,12 +389,12 @@ impl Application {
                 if let Some((k, _)) = hit {
                     let keys_held = InputManager::are_keys_held();
                     let effect = self.fsm.transition(InteractionEvent::MenuSelect(k, keys_held));
+                    self.sync_input_state();
                     match effect {
                         InteractionEffect::MenuExecuted { command, label } => {
                             self.modal_menu.hide();
                             self.hint_toast.hide();
                             self.toast.hide();
-                            self.input_manager.set_modal_menu(false);
 
                             let text = format!("Executed: {}", label);
                             self.toast.show(anchor, &text, &self.config.toast, theme);
@@ -395,6 +413,15 @@ impl Application {
                         _ => {}
                     }
                     return;
+                } else {
+                    // Click occurred outside modal menu card: cancel cleanly
+                    let keys_held = InputManager::are_keys_held();
+                    let _ = self.fsm.transition(InteractionEvent::MenuEsc(keys_held));
+                    self.sync_input_state();
+                    self.modal_menu.hide();
+                    self.hint_toast.hide();
+                    self.toast.hide();
+                    return;
                 }
             }
         }
@@ -402,6 +429,7 @@ impl Application {
         let anchor = self.fsm.active_anchor().unwrap_or(pt);
         let keys_held = InputManager::are_keys_held();
         let effect = self.fsm.transition(InteractionEvent::LButtonDown(pt, keys_held));
+        self.sync_input_state();
         match effect {
             InteractionEffect::Committed(sector) => {
                 self.handle_commit_resolution(anchor, sector);
@@ -410,7 +438,6 @@ impl Application {
                 self.diagnostics.log_cancel();
                 self.overlay.hide();
                 self.toast.hide();
-                self.input_manager.set_active(false);
             }
             _ => {}
         }
@@ -420,6 +447,7 @@ impl Application {
         let anchor = self.fsm.active_anchor().unwrap_or(pt);
         let keys_held = InputManager::are_keys_held();
         let effect = self.fsm.transition(InteractionEvent::WinUp(pt, keys_held));
+        self.sync_input_state();
         match effect {
             InteractionEffect::Committed(sector) => {
                 self.handle_commit_resolution(anchor, sector);
@@ -428,7 +456,6 @@ impl Application {
                 self.diagnostics.log_cancel();
                 self.overlay.hide();
                 self.toast.hide();
-                self.input_manager.set_active(false);
             }
             _ => {}
         }
@@ -488,18 +515,18 @@ impl Application {
     fn handle_rbuttondown(&mut self) {
         let keys_held = InputManager::are_keys_held();
         let _ = self.fsm.transition(InteractionEvent::RButtonDown(Point::default(), keys_held));
+        self.sync_input_state();
         self.diagnostics.log_cancel();
         self.overlay.hide();
         self.modal_menu.hide();
         self.hint_toast.hide();
         self.toast.hide();
-        self.input_manager.set_active(false);
-        self.input_manager.set_modal_menu(false);
     }
 
     fn handle_menu_keydown(&mut self, ch: char) {
         let theme = self.config.get_theme_for_profile(self.active_profile);
         let effect = self.fsm.transition(InteractionEvent::MenuKeyDown(ch));
+        self.sync_input_state();
         if let InteractionEffect::MenuHighlightChanged { key, item } = effect {
             if let Some(anchor) = self.fsm.active_anchor() {
                 if let Some(nav_stack) = self.fsm.menu_nav_stack() {
@@ -523,6 +550,7 @@ impl Application {
         let theme = self.config.get_theme_for_profile(self.active_profile);
         let keys_held = InputManager::are_keys_held();
         let effect = self.fsm.transition(InteractionEvent::MenuKeyUp(ch, keys_held));
+        self.sync_input_state();
         let anchor = self.fsm.active_anchor().unwrap_or_default();
 
         match effect {
@@ -530,7 +558,6 @@ impl Application {
                 self.modal_menu.hide();
                 self.hint_toast.hide();
                 self.toast.hide();
-                self.input_manager.set_modal_menu(false);
 
                 let text = format!("Executed: {}", label);
                 self.toast.show(anchor, &text, &self.config.toast, theme);
@@ -559,6 +586,7 @@ impl Application {
     fn handle_menu_tab(&mut self, shift: bool) {
         let theme = self.config.get_theme_for_profile(self.active_profile);
         let effect = self.fsm.transition(InteractionEvent::MenuTab { shift });
+        self.sync_input_state();
         let anchor = self.fsm.active_anchor().unwrap_or_default();
         self.toast.hide();
 
@@ -575,13 +603,14 @@ impl Application {
     fn handle_menu_esc(&mut self) {
         let keys_held = InputManager::are_keys_held();
         let _ = self.fsm.transition(InteractionEvent::MenuEsc(keys_held));
+        self.sync_input_state();
         self.modal_menu.hide();
         self.hint_toast.hide();
         self.toast.hide();
-        self.input_manager.set_modal_menu(false);
     }
 
     fn handle_allkeysup(&mut self) {
         let _ = self.fsm.transition(InteractionEvent::AllKeysUp);
+        self.sync_input_state();
     }
 }

@@ -37,16 +37,18 @@ pub unsafe extern "system" fn ll_keyboard_proc(
         // Track Windows modifier keys strictly on down/up transitions
         if is_down {
             if vk == VK_LWIN {
-                LEFT_WIN_DOWN.store(true, Ordering::SeqCst);
-                // Self-heal: A physical Win down transition while inactive breaks any
+                let was_down = LEFT_WIN_DOWN.swap(true, Ordering::SeqCst);
+                // Self-heal: Only a fresh physical Win down transition while inactive breaks any
                 // stale autorepeat lock from a previous interaction (even if a dropped
-                // keyup from Task View/Win+Tab had left LEFT_WIN_DOWN true)
-                if !IS_ACTIVE.load(Ordering::SeqCst) && !IS_MODAL_MENU.load(Ordering::SeqCst) {
+                // keyup from Task View/Win+Tab had left LEFT_WIN_DOWN true).
+                // Crucially, typematic autorepeats while Win/Esc remain physically held MUST NOT
+                // reset REQUIRE_KEY_RELEASE (INV-INPUT-007, AGENTS.md 1.2).
+                if !was_down && !is_escape_down() && !IS_ACTIVE.load(Ordering::SeqCst) && !IS_MODAL_MENU.load(Ordering::SeqCst) {
                     REQUIRE_KEY_RELEASE.store(false, Ordering::SeqCst);
                 }
             } else if vk == VK_RWIN {
-                RIGHT_WIN_DOWN.store(true, Ordering::SeqCst);
-                if !IS_ACTIVE.load(Ordering::SeqCst) && !IS_MODAL_MENU.load(Ordering::SeqCst) {
+                let was_down = RIGHT_WIN_DOWN.swap(true, Ordering::SeqCst);
+                if !was_down && !is_escape_down() && !IS_ACTIVE.load(Ordering::SeqCst) && !IS_MODAL_MENU.load(Ordering::SeqCst) {
                     REQUIRE_KEY_RELEASE.store(false, Ordering::SeqCst);
                 }
             } else if vk == VK_ESCAPE {
@@ -189,8 +191,10 @@ pub unsafe extern "system" fn ll_keyboard_proc(
                         LPARAM(Point::new(pt.x, pt.y).to_lparam()),
                     );
                 }
-                return LRESULT(1);
-            } else if was_active || modal_active || require_release {
+                if SWALLOW_TRIGGER.load(Ordering::SeqCst) {
+                    return LRESULT(1);
+                }
+            } else if (was_active || modal_active || require_release) && SWALLOW_TRIGGER.load(Ordering::SeqCst) {
                 return LRESULT(1);
             }
         }
@@ -199,7 +203,7 @@ pub unsafe extern "system" fn ll_keyboard_proc(
         if is_up && (vk == VK_LWIN || vk == VK_RWIN) {
             let was_active = IS_ACTIVE.load(Ordering::SeqCst);
             if was_active && !win_held {
-                IS_ACTIVE.store(false, Ordering::SeqCst);
+                set_active(false);
 
                 let mut pt = POINT::default();
                 let _ = GetCursorPos(&mut pt);

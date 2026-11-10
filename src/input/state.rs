@@ -28,8 +28,14 @@ pub static SWALLOW_RMB_UP: AtomicBool = AtomicBool::new(false);
 // Tracks swallow state for WM_MBUTTONDOWN to ensure paired WM_MBUTTONUP is swallowed
 pub static SWALLOW_MMB_UP: AtomicBool = AtomicBool::new(false);
 
+// Configuration flags controlling which modifiers qualify and whether triggers are swallowed
+pub static ALLOW_LEFT_WIN: AtomicBool = AtomicBool::new(true);
+pub static ALLOW_RIGHT_WIN: AtomicBool = AtomicBool::new(true);
+pub static SWALLOW_TRIGGER: AtomicBool = AtomicBool::new(true);
+
 pub fn is_win_down() -> bool {
-    LEFT_WIN_DOWN.load(Ordering::SeqCst) || RIGHT_WIN_DOWN.load(Ordering::SeqCst)
+    (ALLOW_LEFT_WIN.load(Ordering::SeqCst) && LEFT_WIN_DOWN.load(Ordering::SeqCst))
+        || (ALLOW_RIGHT_WIN.load(Ordering::SeqCst) && RIGHT_WIN_DOWN.load(Ordering::SeqCst))
 }
 
 pub fn is_escape_down() -> bool {
@@ -41,6 +47,12 @@ pub fn are_keys_held() -> bool {
 }
 
 
+pub fn apply_activation_config(left_win: bool, right_win: bool, swallow_trigger: bool) {
+    ALLOW_LEFT_WIN.store(left_win, Ordering::SeqCst);
+    ALLOW_RIGHT_WIN.store(right_win, Ordering::SeqCst);
+    SWALLOW_TRIGGER.store(swallow_trigger, Ordering::SeqCst);
+}
+
 pub fn set_active(active: bool) {
     IS_ACTIVE.store(active, Ordering::SeqCst);
     if !active {
@@ -50,6 +62,10 @@ pub fn set_active(active: bool) {
             REQUIRE_KEY_RELEASE.store(false, Ordering::SeqCst);
         }
     }
+}
+
+pub fn is_active() -> bool {
+    IS_ACTIVE.load(Ordering::SeqCst)
 }
 
 pub fn set_modal_menu(active: bool) {

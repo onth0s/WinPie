@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use windows::Win32::Foundation::{CloseHandle, HANDLE, HWND, POINT, RECT};
 use windows::Win32::Security::{GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY};
 use windows::Win32::System::DataExchange::{
-    CloseClipboard, GetClipboardSequenceNumber, IsClipboardFormatAvailable, OpenClipboard,
+    GetClipboardSequenceNumber, GetOpenClipboardWindow, IsClipboardFormatAvailable,
 };
 use windows::Win32::System::Performance::QueryPerformanceCounter;
 use windows::Win32::System::ProcessStatus::GetModuleFileNameExW;
@@ -104,6 +104,104 @@ impl From<&InvocationContext> for WindowContext {
     }
 }
 
+/// Captures foreground window and process image metadata.
+pub fn capture_foreground_window_and_process(hwnd: HWND) -> (WindowSnapshot, ProcessSnapshot) {
+    let mut window = WindowSnapshot::default();
+    let mut process = ProcessSnapshot::default();
+
+    if hwnd.0.is_null() {
+        return (window, process);
+    }
+
+    unsafe {
+        window.hwnd = hwnd.0 as isize;
+
+        let mut win_rect = RECT::default();
+        let _ = GetWindowRect(hwnd, &mut win_rect);
+        window.rect = [win_rect.left, win_rect.top, win_rect.right, win_rect.bottom];
+
+        // Window class
+        let mut class_buf = [0u16; 256];
+        let class_len = GetClassNameW(hwnd, &mut class_buf);
+        if class_len > 0 {
+            window.class_name = String::from_utf16_lossy(&class_buf[..class_len as usize]);
+        }
+
+        // Window title
+        let mut title_buf = [0u16; 512];
+        let title_len = GetWindowTextW(hwnd, &mut title_buf);
+        if title_len > 0 {
+            window.window_title = String::from_utf16_lossy(&title_buf[..title_len as usize]);
+        }
+
+        // Process Snapshot
+        let mut pid: u32 = 0;
+        let _ = GetWindowThreadProcessId(hwnd, Some(&mut pid));
+        process.pid = pid;
+
+        if pid != 0 {
+            let proc_handle_res = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
+                .or_else(|_| OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, false, pid));
+
+            if let Ok(proc_handle) = proc_handle_res {
+                // Try QueryFullProcessImageNameW first (standard for PROCESS_QUERY_LIMITED_INFORMATION)
+                let mut img_buf = [0u16; 1024];
+                let mut img_len = img_buf.len() as u32;
+
+                let query_res = QueryFullProcessImageNameW(
+                    proc_handle,
+                    PROCESS_NAME_WIN32,
+                    windows::core::PWSTR(img_buf.as_mut_ptr()),
+                    &mut img_len,
+                );
+
+                let mut full_path = String::new();
+                if query_res.is_ok() && img_len > 0 {
+                    full_path = String::from_utf16_lossy(&img_buf[..img_len as usize]);
+                } else {
+                    // Fallback to GetModuleFileNameExW
+                    let mut mod_buf = [0u16; 1024];
+                    let mod_len = GetModuleFileNameExW(proc_handle, None, &mut mod_buf);
+                    if mod_len > 0 {
+                        full_path = String::from_utf16_lossy(&mod_buf[..mod_len as usize]);
+                    }
+                }
+
+                if !full_path.is_empty() {
+                    let path_obj = Path::new(&full_path);
+                    if let Some(name) = path_obj.file_name() {
+                        process.image_name = name.to_string_lossy().to_lowercase();
+                    }
+                    process.image_path = full_path;
+                }
+
+                // Check process elevation token
+                let mut token = HANDLE::default();
+                if OpenProcessToken(proc_handle, TOKEN_QUERY, &mut token).is_ok() {
+                    let mut elevation = TOKEN_ELEVATION::default();
+                    let mut ret_len = 0u32;
+                    if GetTokenInformation(
+                        token,
+                        TokenElevation,
+                        Some(&mut elevation as *mut _ as *mut std::ffi::c_void),
+                        std::mem::size_of::<TOKEN_ELEVATION>() as u32,
+                        &mut ret_len,
+                    )
+                    .is_ok()
+                    {
+                        process.is_elevated = elevation.TokenIsElevated != 0;
+                    }
+                    let _ = CloseHandle(token);
+                }
+
+                let _ = CloseHandle(proc_handle);
+            }
+        }
+    }
+
+    (window, process)
+}
+
 /// Atomically captures the complete immutable `InvocationContext` snapshot.
 /// Guarantees execution in $\le 2.0\,\text{ms}$ (INV-CTX-002).
 pub fn capture_invocation_context(cursor: Point) -> InvocationContext {
@@ -116,95 +214,8 @@ pub fn capture_invocation_context(cursor: Point) -> InvocationContext {
     unsafe {
         let hwnd = GetForegroundWindow();
 
-        // 1. Window Snapshot
-        let mut window = WindowSnapshot::default();
-        let mut process = ProcessSnapshot::default();
-
-        if !hwnd.0.is_null() {
-            window.hwnd = hwnd.0 as isize;
-
-            let mut win_rect = RECT::default();
-            let _ = GetWindowRect(hwnd, &mut win_rect);
-            window.rect = [win_rect.left, win_rect.top, win_rect.right, win_rect.bottom];
-
-            // Window class
-            let mut class_buf = [0u16; 256];
-            let class_len = GetClassNameW(hwnd, &mut class_buf);
-            if class_len > 0 {
-                window.class_name = String::from_utf16_lossy(&class_buf[..class_len as usize]);
-            }
-
-            // Window title
-            let mut title_buf = [0u16; 512];
-            let title_len = GetWindowTextW(hwnd, &mut title_buf);
-            if title_len > 0 {
-                window.window_title = String::from_utf16_lossy(&title_buf[..title_len as usize]);
-            }
-
-            // 2. Process Snapshot
-            let mut pid: u32 = 0;
-            let _ = GetWindowThreadProcessId(hwnd, Some(&mut pid));
-            process.pid = pid;
-
-            if pid != 0 {
-                let proc_handle_res = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
-                    .or_else(|_| OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, false, pid));
-
-                if let Ok(proc_handle) = proc_handle_res {
-                    // Try QueryFullProcessImageNameW first (standard for PROCESS_QUERY_LIMITED_INFORMATION)
-                    let mut img_buf = [0u16; 1024];
-                    let mut img_len = img_buf.len() as u32;
-
-                    let query_res = QueryFullProcessImageNameW(
-                        proc_handle,
-                        PROCESS_NAME_WIN32,
-                        windows::core::PWSTR(img_buf.as_mut_ptr()),
-                        &mut img_len,
-                    );
-
-                    let mut full_path = String::new();
-                    if query_res.is_ok() && img_len > 0 {
-                        full_path = String::from_utf16_lossy(&img_buf[..img_len as usize]);
-                    } else {
-                        // Fallback to GetModuleFileNameExW
-                        let mut mod_buf = [0u16; 1024];
-                        let mod_len = GetModuleFileNameExW(proc_handle, None, &mut mod_buf);
-                        if mod_len > 0 {
-                            full_path = String::from_utf16_lossy(&mod_buf[..mod_len as usize]);
-                        }
-                    }
-
-                    if !full_path.is_empty() {
-                        let path_obj = Path::new(&full_path);
-                        if let Some(name) = path_obj.file_name() {
-                            process.image_name = name.to_string_lossy().to_lowercase();
-                        }
-                        process.image_path = full_path;
-                    }
-
-                    // Check process elevation token
-                    let mut token = HANDLE::default();
-                    if OpenProcessToken(proc_handle, TOKEN_QUERY, &mut token).is_ok() {
-                        let mut elevation = TOKEN_ELEVATION::default();
-                        let mut ret_len = 0u32;
-                        if GetTokenInformation(
-                            token,
-                            TokenElevation,
-                            Some(&mut elevation as *mut _ as *mut std::ffi::c_void),
-                            std::mem::size_of::<TOKEN_ELEVATION>() as u32,
-                            &mut ret_len,
-                        )
-                        .is_ok()
-                        {
-                            process.is_elevated = elevation.TokenIsElevated != 0;
-                        }
-                        let _ = CloseHandle(token);
-                    }
-
-                    let _ = CloseHandle(proc_handle);
-                }
-            }
-        }
+        // 1 & 2. Window & Process Snapshot
+        let (window, process) = capture_foreground_window_and_process(hwnd);
 
         // 3. Monitor Snapshot
         let mut monitor = MonitorSnapshot::default();
@@ -240,18 +251,14 @@ pub fn capture_invocation_context(cursor: Point) -> InvocationContext {
         }
 
         // 4. Non-Blocking Clipboard Snapshot (INV-CTX-003)
+        // Completely lock-free querying: does not open or lock the OS clipboard
         let sequence_number = GetClipboardSequenceNumber();
         let has_text = IsClipboardFormatAvailable(CF_UNICODETEXT_VAL).is_ok()
             || IsClipboardFormatAvailable(CF_TEXT_VAL).is_ok();
         let has_files = IsClipboardFormatAvailable(CF_HDROP_VAL).is_ok();
 
-        // Non-blocking clipboard lock test (never hangs invocation)
-        let is_locked = if OpenClipboard(HWND::default()).is_ok() {
-            let _ = CloseClipboard();
-            false
-        } else {
-            true
-        };
+        // Lock-free check if clipboard is currently locked by another application
+        let is_locked = GetOpenClipboardWindow().map(|h| !h.0.is_null()).unwrap_or(false);
 
         let clipboard = ClipboardSnapshot {
             sequence_number,
@@ -276,12 +283,39 @@ pub fn capture_invocation_context(cursor: Point) -> InvocationContext {
 /// Retrieves the current foreground window context with sub-millisecond overhead.
 /// (Maintained for lightweight profile matching and backward compatibility).
 pub fn active_window_context() -> WindowContext {
-    let mut pt = POINT::default();
-    unsafe {
-        let _ = windows::Win32::UI::WindowsAndMessaging::GetCursorPos(&mut pt);
+    let hwnd = unsafe { GetForegroundWindow() };
+    let (window, process) = capture_foreground_window_and_process(hwnd);
+    WindowContext {
+        process_name: process.image_name,
+        process_path: process.image_path,
+        window_class: window.class_name,
+        window_title: window.window_title,
     }
-    let inv = capture_invocation_context(Point::new(pt.x, pt.y));
-    WindowContext::from(&inv)
+}
+
+/// Returns true if the current process token has the Administrator role (High Integrity).
+pub fn is_current_process_elevated() -> bool {
+    use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+    unsafe {
+        let mut token = HANDLE::default();
+        if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token).is_ok() {
+            let mut elevation = TOKEN_ELEVATION::default();
+            let mut ret_len = 0u32;
+            let size = std::mem::size_of::<TOKEN_ELEVATION>() as u32;
+            let ok = GetTokenInformation(
+                token,
+                TokenElevation,
+                Some(&mut elevation as *mut _ as *mut std::ffi::c_void),
+                size,
+                &mut ret_len,
+            ).is_ok();
+            let _ = CloseHandle(token);
+            if ok {
+                return elevation.TokenIsElevated != 0;
+            }
+        }
+    }
+    false
 }
 
 /// Checks whether a specific process executable (e.g. "code.exe" or "notepad.exe") is currently running anywhere on the system.

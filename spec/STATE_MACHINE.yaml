@@ -84,6 +84,11 @@ transitions:
     effect: CANCEL
 
   - from: MODAL_MENU
+    event: LBUTTON_DOWN_OUTSIDE
+    to: IDLE_OR_WAIT_RELEASE
+    effect: CANCEL
+
+  - from: MODAL_MENU
     event: FATAL_ERROR
     to: IDLE
     effect: CANCEL

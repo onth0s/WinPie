@@ -65,7 +65,10 @@ pub fn execute_command_with_context(
 
         // Inject contextual environment variables from frozen snapshot
         if let Some(ctx) = context {
+            cmd.env("WINPIE_CONTEXT_INVOCATION_ID", ctx.invocation_id.to_string());
+            cmd.env("WINPIE_CONTEXT_PID", ctx.process.pid.to_string());
             cmd.env("WINPIE_CONTEXT_HWND", ctx.window.hwnd.to_string());
+            cmd.env("WINPIE_CONTEXT_EXE", &ctx.process.image_name);
             cmd.env("WINPIE_CONTEXT_PROCESS_NAME", &ctx.process.image_name);
             cmd.env("WINPIE_CONTEXT_PROCESS_PATH", &ctx.process.image_path);
             cmd.env("WINPIE_CONTEXT_WINDOW_CLASS", &ctx.window.class_name);

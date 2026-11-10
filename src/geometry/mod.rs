@@ -1,89 +1,10 @@
 use std::f64::consts::PI;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Sector {
-    N = 0,
-    NE = 1,
-    E = 2,
-    SE = 3,
-    S = 4,
-    SW = 5,
-    W = 6,
-    NW = 7,
-}
+pub mod point;
+pub mod sector;
 
-impl Sector {
-    pub const ALL: [Sector; 8] = [
-        Sector::N,
-        Sector::NE,
-        Sector::E,
-        Sector::SE,
-        Sector::S,
-        Sector::SW,
-        Sector::W,
-        Sector::NW,
-    ];
-
-    pub fn from_index(index: usize) -> Self {
-        match index % 8 {
-            0 => Sector::N,
-            1 => Sector::NE,
-            2 => Sector::E,
-            3 => Sector::SE,
-            4 => Sector::S,
-            5 => Sector::SW,
-            6 => Sector::W,
-            7 => Sector::NW,
-            _ => unreachable!(),
-        }
-    }
-
-    pub fn name(&self) -> &'static str {
-        match self {
-            Sector::N => "N",
-            Sector::NE => "NE",
-            Sector::E => "E",
-            Sector::SE => "SE",
-            Sector::S => "S",
-            Sector::SW => "SW",
-            Sector::W => "W",
-            Sector::NW => "NW",
-        }
-    }
-
-    pub fn center_angle_degrees(&self) -> f64 {
-        (*self as usize as f64) * 45.0
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct Point {
-    pub x: i32,
-    pub y: i32,
-}
-
-impl Point {
-    pub fn new(x: i32, y: i32) -> Self {
-        Self { x, y }
-    }
-
-    /// Packs (x, y) into a 64-bit LPARAM for Win32 thread messaging.
-    /// Low 32 bits = x, High 32 bits = y.
-    pub fn to_lparam(self) -> isize {
-        let low = (self.x as u32) as u64;
-        let high = (self.y as u32) as u64;
-        ((high << 32) | low) as isize
-    }
-
-    /// Unpacks a 64-bit LPARAM back into a signed (x, y) Point,
-    /// correctly handling negative multi-monitor coordinates.
-    pub fn from_lparam(lparam: isize) -> Self {
-        let raw = lparam as u64;
-        let x = (raw & 0xFFFF_FFFF) as u32 as i32;
-        let y = ((raw >> 32) & 0xFFFF_FFFF) as u32 as i32;
-        Self { x, y }
-    }
-}
+pub use point::Point;
+pub use sector::Sector;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct GeometryConfig {
@@ -196,4 +117,3 @@ pub fn evaluate_commit(center: Point, cursor: Point, config: &GeometryConfig) ->
         Resolution::Commit(sector)
     }
 }
-

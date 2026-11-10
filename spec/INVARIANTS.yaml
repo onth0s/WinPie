@@ -185,3 +185,23 @@ invariants:
     severity: critical
     statement: >
       Every supported ACTIVE input sequence eventually returns to IDLE.
+
+  - id: INV-CTX-001
+    category: context
+    severity: critical
+    statement: >
+      InvocationContext is captured atomically once at the exact trigger qualification
+      timestamp and remains immutable for downstream command resolution.
+
+  - id: INV-CTX-002
+    category: context
+    severity: critical
+    statement: >
+      InvocationContext capture completes within <= 2.0 ms on average.
+
+  - id: INV-CTX-003
+    category: context
+    severity: critical
+    statement: >
+      System clipboard inspection during InvocationContext capture is completely lock-free
+      and never blocks or disrupts other applications.

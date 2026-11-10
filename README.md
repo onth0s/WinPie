@@ -376,6 +376,11 @@ winpie/
 ├── src/
 │   ├── main.rs               # Entrypoint & CLI command dispatcher
 │   ├── app.rs                # Application runtime, DPI & Win32 message pump
+│   ├── config/
+│   │   ├── mod.rs            # Public API exports & re-exports
+│   │   ├── schema.rs         # Configuration structs, node graphs, defaults & theme models
+│   │   ├── matcher.rs        # Window/clipboard context matchers & specificity scoring
+│   │   └── loader.rs         # YAML auto-repair parser, discovery & CLI overrides
 │   ├── context.rs            # Active window inspection & contextual profile matching
 │   ├── ipc.rs                # Win32 IPC, mutex, control window & autostart manager
 │   ├── input/
@@ -392,6 +397,7 @@ winpie/
 │   │   └── sector.rs         # Sector definitions & classification
 │   ├── overlay/
 │   │   ├── mod.rs
+│   │   ├── surface.rs        # Shared 32-bit DIB surface, SDF cards & ClearType compositing
 │   │   ├── window.rs         # Win32 layered radial menu window
 │   │   ├── render.rs         # 4x RGSS wheel & ClearType label rasterization
 │   │   ├── modal_menu.rs     # Layered modal submenu card & hit-testing
@@ -402,7 +408,9 @@ winpie/
     ├── config.rs             # Configuration schema, discovery & hot-reload test suite
     ├── context.rs            # Window context & contextual profile inheritance test suite
     ├── geometry.rs           # Geometry, label, theme, startup & toast test suite
-    └── interaction.rs        # State machine, submenu & mouse hit-test verification
+    ├── interaction.rs        # State machine, submenu & mouse hit-test verification
+    ├── performance.rs        # Latency & throughput benchmark gates (<2ms context capture)
+    └── specs.rs              # Formal state machine & invariant specification isomorphism
 ```
 
 ---
@@ -415,7 +423,7 @@ Run the full automated test suite:
 cargo test --all-targets
 ```
 
-All 53 unit and integration tests verify:
+All 59 unit and integration tests verify:
 - Configuration specification schema completeness and live hot-reloading
 - 8-way angular classification and rotation offsets
 - Multi-monitor negative virtual screen coordinate roundtrips

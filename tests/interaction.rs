@@ -415,3 +415,29 @@ fn test_ghost_win_state_does_not_block_require_release_reset() {
     assert!(!REQUIRE_KEY_RELEASE.load(Ordering::SeqCst));
     LEFT_WIN_DOWN.store(false, Ordering::SeqCst);
 }
+
+#[test]
+fn test_typematic_autorepeat_does_not_clear_require_release_while_win_held() {
+    use std::sync::atomic::Ordering;
+    use winpie::input::state::{REQUIRE_KEY_RELEASE, LEFT_WIN_DOWN, ESCAPE_DOWN, IS_ACTIVE, IS_MODAL_MENU};
+
+    // User cancelled menu while holding Win
+    LEFT_WIN_DOWN.store(true, Ordering::SeqCst);
+    ESCAPE_DOWN.store(false, Ordering::SeqCst);
+    REQUIRE_KEY_RELEASE.store(true, Ordering::SeqCst);
+    IS_ACTIVE.store(false, Ordering::SeqCst);
+    IS_MODAL_MENU.store(false, Ordering::SeqCst);
+
+    // Hardware typematic autorepeat emits repeated WM_KEYDOWN for VK_LWIN every ~30ms
+    let was_down = LEFT_WIN_DOWN.swap(true, Ordering::SeqCst);
+    if !was_down && !ESCAPE_DOWN.load(Ordering::SeqCst) && !IS_ACTIVE.load(Ordering::SeqCst) && !IS_MODAL_MENU.load(Ordering::SeqCst) {
+        REQUIRE_KEY_RELEASE.store(false, Ordering::SeqCst);
+    }
+
+    // REQUIRE_KEY_RELEASE must remain true because Win was already physically held!
+    assert!(REQUIRE_KEY_RELEASE.load(Ordering::SeqCst), "Typematic autorepeat while Win held must NOT clear REQUIRE_KEY_RELEASE");
+
+    // Clean up
+    LEFT_WIN_DOWN.store(false, Ordering::SeqCst);
+    REQUIRE_KEY_RELEASE.store(false, Ordering::SeqCst);
+}

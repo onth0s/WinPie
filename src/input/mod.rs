@@ -64,8 +64,24 @@ impl InputManager {
         state::set_active(active);
     }
 
+    pub fn is_active() -> bool {
+        state::is_active()
+    }
+
     pub fn set_modal_menu(&self, active: bool) {
         state::set_modal_menu(active);
+    }
+
+    pub fn is_modal_menu() -> bool {
+        state::is_modal_menu()
+    }
+
+    pub fn apply_config(&self, activation: &crate::config::ActivationConfig) {
+        state::apply_activation_config(
+            activation.left_win,
+            activation.right_win,
+            activation.swallow_trigger,
+        );
     }
 }
 

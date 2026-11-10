@@ -140,12 +140,15 @@ profiles:
         N: "Chrome N"
 "#;
     let config: AppConfig = serde_yaml::from_str(yaml).expect("Valid YAML");
-    let ctx = capture_invocation_context(Point::new(100, 100));
+    let mut ctx = capture_invocation_context(Point::new(100, 100));
+    ctx.process.image_name = "code.exe".to_string();
+    ctx.window.window_title = "WinPie - Code".to_string();
 
     let iterations = 10_000;
     let start = Instant::now();
     for _ in 0..iterations {
-        let _ = config.find_matching_profile_for_invocation(&ctx);
+        let matched = config.find_matching_profile_for_invocation(&ctx);
+        assert_eq!(matched, Some(0));
     }
     let elapsed = start.elapsed();
     let avg_micros = elapsed.as_micros() as f64 / (iterations as f64);

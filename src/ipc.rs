@@ -1,9 +1,9 @@
 use std::path::PathBuf;
 use std::process::Command;
 use std::time::Duration;
-use windows::Win32::Foundation::{ERROR_ALREADY_EXISTS, GetLastError, HANDLE, HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::Foundation::{CloseHandle, ERROR_ALREADY_EXISTS, GetLastError, HANDLE, HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::StationsAndDesktops::{CloseDesktop, GetThreadDesktop, OpenDesktopW, SetThreadDesktop, DESKTOP_CONTROL_FLAGS};
-use windows::Win32::System::Threading::{CreateMutexW, GetCurrentThreadId};
+use windows::Win32::System::Threading::{CreateMutexW, GetCurrentThreadId, OpenMutexW, ReleaseMutex, SYNCHRONIZATION_SYNCHRONIZE};
 use windows::Win32::UI::WindowsAndMessaging::*;
 
 pub const CONTROL_WINDOW_CLASS: windows::core::PCWSTR = windows::core::w!("WinPieControlWindowClass");
@@ -11,7 +11,7 @@ pub const CONTROL_WINDOW_TITLE: windows::core::PCWSTR = windows::core::w!("WinPi
 pub const SINGLETON_MUTEX_GLOBAL: windows::core::PCWSTR = windows::core::w!("Global\\WinPie_SingleInstance_Mutex");
 pub const SINGLETON_MUTEX_LOCAL: windows::core::PCWSTR = windows::core::w!("Local\\WinPie_SingleInstance_Mutex");
 
-pub const WM_WINPIE_CONTROL_KILL: u32 = WM_USER + 101;
+pub const WM_WINPIE_CONTROL_KILL: u32 = WM_USER + 201;
 
 /// Hidden message-only window used for inter-process communication and remote control.
 pub struct ControlWindow {
@@ -133,33 +133,65 @@ pub fn find_control_window() -> Option<HWND> {
     None
 }
 
+/// RAII guard holding the acquired singleton instance mutex handle.
+pub struct SingletonGuard(HANDLE);
+
+impl SingletonGuard {
+    pub fn handle(&self) -> HANDLE {
+        self.0
+    }
+}
+
+impl Drop for SingletonGuard {
+    fn drop(&mut self) {
+        unsafe {
+            if !self.0.is_invalid() && !self.0.0.is_null() {
+                let _ = ReleaseMutex(self.0);
+                let _ = CloseHandle(self.0);
+            }
+        }
+    }
+}
+
 /// Checks if an instance of WinPie is already active.
 pub fn is_running() -> bool {
     if find_control_window().is_some() {
         return true;
     }
-    // Check if the singleton mutex is held by another process
-    try_acquire_singleton().is_none()
+    // Probe if singleton mutex exists without acquiring or leaking it
+    unsafe {
+        if let Ok(handle) = OpenMutexW(SYNCHRONIZATION_SYNCHRONIZE, false, SINGLETON_MUTEX_GLOBAL) {
+            let _ = CloseHandle(handle);
+            return true;
+        }
+        if let Ok(handle) = OpenMutexW(SYNCHRONIZATION_SYNCHRONIZE, false, SINGLETON_MUTEX_LOCAL) {
+            let _ = CloseHandle(handle);
+            return true;
+        }
+    }
+    false
 }
 
-/// Acquires the singleton mutex. Returns `Some(HANDLE)` on success, or `None` if an instance already exists.
-pub fn try_acquire_singleton() -> Option<HANDLE> {
+/// Acquires the singleton mutex. Returns `Some(SingletonGuard)` on success, or `None` if an instance already exists.
+pub fn try_acquire_singleton() -> Option<SingletonGuard> {
     unsafe {
         // Attempt Global mutex first (per AGENTS.md rule 1.6)
         match CreateMutexW(None, true, SINGLETON_MUTEX_GLOBAL) {
             Ok(handle) => {
                 if GetLastError() == ERROR_ALREADY_EXISTS {
+                    let _ = CloseHandle(handle);
                     return None;
                 }
-                Some(handle)
+                Some(SingletonGuard(handle))
             }
             Err(_) => {
                 // Fall back to Local namespace if Global creation fails (e.g. non-admin token without SeCreateGlobalPrivilege)
                 let handle = CreateMutexW(None, true, SINGLETON_MUTEX_LOCAL).ok()?;
                 if GetLastError() == ERROR_ALREADY_EXISTS {
+                    let _ = CloseHandle(handle);
                     return None;
                 }
-                Some(handle)
+                Some(SingletonGuard(handle))
             }
         }
     }
@@ -224,6 +256,11 @@ pub fn autostart_status() -> bool {
     }
 }
 
+/// Safely escapes a string for embedding into a single-quoted PowerShell string literal.
+pub fn escape_ps_single_quoted(s: &str) -> String {
+    s.replace('\'', "''")
+}
+
 /// Enables or disables WinPie launching on Windows startup.
 pub fn set_autostart(enable: bool) -> Result<(), Box<dyn std::error::Error>> {
     let shortcut_path = get_startup_shortcut_path()
@@ -241,11 +278,11 @@ pub fn set_autostart(enable: bool) -> Result<(), Box<dyn std::error::Error>> {
             current_exe
         };
 
-        let target_str = target_exe.to_string_lossy();
+        let target_str = escape_ps_single_quoted(&target_exe.to_string_lossy());
         let work_dir = std::env::current_dir()
             .unwrap_or_else(|_| target_exe.parent().unwrap_or(&target_exe).to_path_buf());
-        let work_dir_str = work_dir.to_string_lossy();
-        let link_str = shortcut_path.to_string_lossy();
+        let work_dir_str = escape_ps_single_quoted(&work_dir.to_string_lossy());
+        let link_str = escape_ps_single_quoted(&shortcut_path.to_string_lossy());
 
         // Use PowerShell WScript.Shell COM object to create rock-solid Windows shortcut
         let ps_script = format!(

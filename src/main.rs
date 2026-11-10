@@ -124,31 +124,6 @@ fn run_debug_tail() -> Result<(), Box<dyn std::error::Error>> {
     }
 }
 
-/// Returns true if the current process token has the Administrator role (High Integrity).
-fn is_elevated() -> bool {
-    use windows::Win32::Foundation::HANDLE;
-    use windows::Win32::Security::{GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY};
-    use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
-    unsafe {
-        let mut token = HANDLE::default();
-        if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token).is_ok() {
-            let mut elevation = TOKEN_ELEVATION::default();
-            let mut ret_len = 0u32;
-            let size = std::mem::size_of::<TOKEN_ELEVATION>() as u32;
-            if GetTokenInformation(
-                token,
-                TokenElevation,
-                Some(&mut elevation as *mut _ as *mut _),
-                size,
-                &mut ret_len,
-            ).is_ok() {
-                return elevation.TokenIsElevated != 0;
-            }
-        }
-    }
-    false
-}
-
 /// Re-launches winpie as Administrator via ShellExecute runas verb.
 /// Returns Ok(()) after handing off to the elevated process; the caller should exit.
 fn relaunch_elevated(config_path: Option<&std::path::Path>) -> Result<(), Box<dyn std::error::Error>> {
@@ -214,7 +189,7 @@ fn relaunch_elevated(config_path: Option<&std::path::Path>) -> Result<(), Box<dy
 fn spawn_detached_daemon() -> Result<(), Box<dyn std::error::Error>> {
     // Check if run_as_admin is requested in config and we are not already elevated
     let (config, config_path) = winpie::config::AppConfig::discover_and_load();
-    if config.daemon.run_as_admin && !is_elevated() {
+    if config.daemon.run_as_admin && !winpie::context::is_current_process_elevated() {
         return relaunch_elevated(config_path.as_deref());
     }
 

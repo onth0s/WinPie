@@ -34,7 +34,7 @@ pub fn generate_precomputed_buffers(
             Some(Sector::from_index(i - 1))
         };
         buf.resize(pixel_count, 0u32);
-        rasterize_wheel_pixels(size, radius, deadzone, rotation, theme, buf, hover_opt);
+        rasterize_wheel_pixels(size, radius, deadzone, rotation, theme, &config.rendering, buf, hover_opt);
 
         if config.rendering.show_labels {
             overlay_labels(size, radius, deadzone, rotation, config, theme, profile_idx, buf, hover_opt);
@@ -44,12 +44,14 @@ pub fn generate_precomputed_buffers(
     precomputed_buffers
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn rasterize_wheel_pixels(
     size: i32,
     r: f64,
     dz: f64,
     rotation: f64,
     theme: &ThemeConfig,
+    rendering: &crate::config::RenderingConfig,
     pixels: &mut [u32],
     hover: Option<Sector>,
 ) {
@@ -120,40 +122,44 @@ pub fn rasterize_wheel_pixels(
                 }
 
                 if dist <= dz {
-                    // Inside deadzone: smooth circular boundary, NO center dot
-                    if dist >= dz - 1.5 {
-                        let a = dz_border_a;
-                        total_a += a;
-                        total_r += dz_border_r * a / 255.0;
-                        total_g += dz_border_g * a / 255.0;
-                        total_b += dz_border_b * a / 255.0;
-                    } else {
-                        // Dark translucent deadzone core
-                        let a = dz_a;
-                        total_a += a;
-                        total_r += dz_r * a / 255.0;
-                        total_g += dz_g * a / 255.0;
-                        total_b += dz_b * a / 255.0;
+                    if rendering.show_deadzone {
+                        // Inside deadzone: smooth circular boundary, NO center dot
+                        if dist >= dz - 1.5 {
+                            let a = dz_border_a;
+                            total_a += a;
+                            total_r += dz_border_r * a / 255.0;
+                            total_g += dz_border_g * a / 255.0;
+                            total_b += dz_border_b * a / 255.0;
+                        } else {
+                            // Dark translucent deadzone core
+                            let a = dz_a;
+                            total_a += a;
+                            total_r += dz_r * a / 255.0;
+                            total_g += dz_g * a / 255.0;
+                            total_b += dz_b * a / 255.0;
+                        }
                     }
                 } else {
                     // Sector ring
                     let angle = crate::geometry::angle_from_north_degrees(sx, sy);
                     let sector = crate::geometry::classify_angle(angle, rotation);
-                    let is_hovered = hover == Some(sector);
+                    let is_hovered = rendering.highlight_hovered && hover == Some(sector);
 
                     // Spoke check
                     let mut min_spoke_dist = f64::MAX;
-                    for &(dx_ray, dy_ray, nx, ny) in &spoke_normals {
-                        let dot = sx * dx_ray + sy * dy_ray;
-                        if dot > 0.0 {
-                            let perp_dist = (sx * nx + sy * ny).abs();
-                            if perp_dist < min_spoke_dist {
-                                min_spoke_dist = perp_dist;
+                    if rendering.show_stubs {
+                        for &(dx_ray, dy_ray, nx, ny) in &spoke_normals {
+                            let dot = sx * dx_ray + sy * dy_ray;
+                            if dot > 0.0 {
+                                let perp_dist = (sx * nx + sy * ny).abs();
+                                if perp_dist < min_spoke_dist {
+                                    min_spoke_dist = perp_dist;
+                                }
                             }
                         }
                     }
 
-                    let is_spoke = min_spoke_dist <= 1.0;
+                    let is_spoke = rendering.show_stubs && min_spoke_dist <= 1.0;
                     let is_rim = dist >= r - 2.0;
 
                     if is_spoke {
@@ -380,25 +386,7 @@ pub fn overlay_labels(
                             let src_g = src_g_val * src_a;
                             let src_b = src_b_val * src_a;
 
-                            // Destination pixel
-                            let dst_pixel = pixels[idx];
-                            let dst_a = ((dst_pixel >> 24) & 0xFF) as f64;
-                            let dst_r = ((dst_pixel >> 16) & 0xFF) as f64;
-                            let dst_g = ((dst_pixel >> 8) & 0xFF) as f64;
-                            let dst_b = (dst_pixel & 0xFF) as f64;
-
-                            // Porter-Duff Source-Over compositing with pre-multiplied alpha
-                            let out_a = src_a * 255.0 + dst_a * (1.0 - src_a);
-                            let out_r = src_r + dst_r * (1.0 - src_a);
-                            let out_g = src_g + dst_g * (1.0 - src_a);
-                            let out_b = src_b + dst_b * (1.0 - src_a);
-
-                            let final_a = (out_a.round() as u32).min(255);
-                            let final_r = (out_r.round() as u32).min(255);
-                            let final_g = (out_g.round() as u32).min(255);
-                            let final_b = (out_b.round() as u32).min(255);
-
-                            pixels[idx] = (final_a << 24) | (final_r << 16) | (final_g << 8) | final_b;
+                            pixels[idx] = crate::overlay::surface::blend_premultiplied_over(pixels[idx], src_r, src_g, src_b, src_a);
                         }
                     }
                 }

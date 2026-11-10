@@ -361,9 +361,9 @@ fn test_execute_command_with_context() {
     );
     assert!(res.is_ok());
 
-    // Execute ps: command
+    // Execute ps: command verifying injected variable content
     let ps_res = winpie::executor::execute_command_with_context(
-        "ps: $x = $env:WINPIE_CONTEXT_EXE; if ($x) { exit 0 } else { exit 0 }",
+        "ps: $x = $env:WINPIE_CONTEXT_EXE; if ($x -eq 'testproc.exe') { exit 0 } else { exit 1 }",
         Some(&dummy_ctx),
     );
     assert!(ps_res.is_ok());

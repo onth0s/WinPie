@@ -1,11 +1,11 @@
 use crate::config::DiagnosticsConfig;
 use crate::geometry::{Point, Sector};
-use std::fs::OpenOptions;
+use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-static LOG_MUTEX: Mutex<()> = Mutex::new(());
+static LOG_FILE: Mutex<Option<File>> = Mutex::new(None);
 
 pub fn get_log_path() -> PathBuf {
     std::env::temp_dir().join("winpie_debug.log")
@@ -14,9 +14,21 @@ pub fn get_log_path() -> PathBuf {
 pub fn log_raw(msg: &str) {
     println!("{}", msg);
 
-    if let Ok(_lock) = LOG_MUTEX.lock() {
-        let log_path = get_log_path();
-        if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&log_path) {
+    if let Ok(mut lock) = LOG_FILE.lock() {
+        if lock.is_none() {
+            let log_path = get_log_path();
+            // Bound debug log file to at most 5MB
+            if let Ok(meta) = std::fs::metadata(&log_path) {
+                if meta.len() > 5 * 1024 * 1024 {
+                    let _ = std::fs::remove_file(&log_path);
+                }
+            }
+            if let Ok(file) = OpenOptions::new().create(true).append(true).open(&log_path) {
+                *lock = Some(file);
+            }
+        }
+
+        if let Some(ref mut file) = *lock {
             let _ = writeln!(file, "{}", msg);
             let _ = file.flush();
         }

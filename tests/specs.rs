@@ -104,6 +104,9 @@ fn test_invariants_spec_integrity() {
     assert!(ids.contains("INV-MENU-001"));
     assert!(ids.contains("INV-MENU-002"));
     assert!(ids.contains("INV-GEOMETRY-001"));
+    assert!(ids.contains("INV-CTX-001"));
+    assert!(ids.contains("INV-CTX-002"));
+    assert!(ids.contains("INV-CTX-003"));
 }
 
 #[test]
