@@ -254,3 +254,40 @@ fn test_yaml_misplaced_submenu_hint() {
         err
     );
 }
+
+#[test]
+fn test_yaml_repair_detailed_summary_and_persistent_file_repair() {
+    let temp_dir = std::env::temp_dir().join(format!("winpie_repair_test_{}", std::process::id()));
+    let _ = fs::create_dir_all(&temp_dir);
+    let test_file = temp_dir.join("config.yaml");
+
+    let raw_crlf = "wheel:\r\n  commands:\r\n    SW: \"C:\\Users\\Leonardo\\AppData\\Roaming\\Telegram Desktop\\Telegram.exe\"\r\n";
+    fs::write(&test_file, raw_crlf).expect("Write broken config");
+
+    // 1. In-memory detailed summary
+    let (_cfg, in_mem) = winpie::config::parse_app_config_detailed(raw_crlf).expect("Auto-repair should succeed");
+    assert_eq!(in_mem.changes.len(), 1);
+    assert_eq!(in_mem.changes[0].line_number, 3);
+    assert!(in_mem.changes[0].original.contains(r"C:\Users\Leonardo"));
+    assert!(in_mem.changes[0].repaired.contains(r"C:\\Users\\Leonardo"));
+
+    let summary = winpie::config::format_repair_summary(&test_file, &in_mem.changes, false);
+    assert!(summary.contains("in-memory only"));
+    assert!(summary.contains("before:"));
+    assert!(summary.contains("after :"));
+    assert!(summary.contains("winpie --repair"));
+
+    // 2. Persistent repair on disk
+    let persisted = winpie::config::repair_config_file(&test_file).expect("Persist repair");
+    assert_eq!(persisted.changes.len(), 1);
+
+    let on_disk = fs::read_to_string(&test_file).expect("Read repaired file");
+    assert!(on_disk.contains("\r\n"), "Should preserve CRLF line endings");
+    assert!(on_disk.contains(r"C:\\Users\\Leonardo\\AppData\\Roaming\\Telegram Desktop\\Telegram.exe"));
+
+    // 3. Second run is a clean no-op
+    let second_run = winpie::config::repair_config_file(&test_file).expect("Second run should succeed");
+    assert!(second_run.changes.is_empty(), "Already-repaired file should need no further changes");
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}

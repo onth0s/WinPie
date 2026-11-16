@@ -214,16 +214,19 @@ impl Application {
 
         match std::fs::read_to_string(&path) {
             Ok(content) => {
-                match crate::config::parse_app_config(&content) {
-                    Ok((new_config, fixed_lines)) => {
-                        if !fixed_lines.is_empty() {
-                            crate::diagnostics::log_raw(&format!(
-                                "[WinPie:CONFIG] Auto-repaired unescaped Windows path(s) at line(s) {:?} in {}",
-                                fixed_lines,
-                                path.display()
+                match crate::config::parse_app_config_detailed(&content) {
+                    Ok((new_config, repair)) => {
+                        if !repair.changes.is_empty() {
+                            crate::diagnostics::log_raw(&crate::config::format_repair_summary(
+                                &path,
+                                &repair.changes,
+                                false,
                             ));
                         }
-                        crate::diagnostics::log_raw(&format!("[WinPie] Hot-reloaded configuration from {}", path.display()));
+                        crate::diagnostics::log_raw(&format!(
+                            "[WinPie] Hot-reloaded configuration from {}",
+                            crate::config::format_display_path(&path)
+                        ));
                         self.config_last_modified = Some(current_mtime);
 
                         let geom_config = GeometryConfig {

@@ -13,6 +13,7 @@ fn print_help() {
     println!("  winpie reload [debug]        Restart WinPie with updated config (optionally stream logs)");
     println!("  winpie status                Check if WinPie is currently running");
     println!("  winpie inspect               Live stream foreground window context & profile matching");
+    println!("  winpie --repair              Persistently auto-repair unescaped Windows paths in config.yaml");
     println!("  winpie autostart enable      Launch WinPie automatically on Windows login");
     println!("  winpie autostart disable     Remove WinPie from Windows startup");
     println!("  winpie autostart status      Check Windows startup shortcut status");
@@ -224,6 +225,41 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if args.len() > 1 {
         match args[1].as_str() {
+            "--repair" | "repair" => {
+                match winpie::config::discover_config_path() {
+                    Some(path) => match winpie::config::repair_config_file(&path) {
+                        Ok(repair) => {
+                            if repair.changes.is_empty() {
+                                println!(
+                                    "[WinPie:CONFIG] No repairs needed; {} is already valid YAML.",
+                                    winpie::config::format_display_path(&path)
+                                );
+                            } else {
+                                println!(
+                                    "{}",
+                                    winpie::config::format_repair_summary(&path, &repair.changes, true)
+                                );
+                                if winpie::ipc::is_running() {
+                                    println!("[WinPie] Changes saved. Running daemon will hot-reload on next activation (or run 'winpie reload').");
+                                }
+                            }
+                            return Ok(());
+                        }
+                        Err(e) => {
+                            eprintln!(
+                                "[WinPie:CONFIG ERROR] Failed to repair {}: {}",
+                                winpie::config::format_display_path(&path),
+                                e
+                            );
+                            return Err(e.into());
+                        }
+                    },
+                    None => {
+                        println!("[WinPie:CONFIG] No configuration file found to repair.");
+                        return Ok(());
+                    }
+                }
+            }
             "inspect" | "context" | "test-context" => {
                 return run_inspector();
             }

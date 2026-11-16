@@ -131,12 +131,65 @@ pub fn discover_config_path() -> Option<PathBuf> {
     None
 }
 
+/// Represents a single line-level YAML auto-repair performed by WinPie.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct YamlRepairChange {
+    pub line_number: usize,
+    pub original: String,
+    pub repaired: String,
+    pub reason: String,
+}
+
+/// Result of sanitizing a YAML configuration string.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct YamlRepairResult {
+    pub sanitized: String,
+    pub changes: Vec<YamlRepairChange>,
+}
+
+/// Formats a filesystem path for human-readable diagnostics by stripping the Windows `\\?\` verbatim prefix.
+pub fn format_display_path(path: &Path) -> String {
+    let s = path.display().to_string();
+    s.strip_prefix(r"\\?\").unwrap_or(&s).to_string()
+}
+
+/// Formats a comprehensive, human-readable summary of YAML auto-repairs.
+pub fn format_repair_summary(path: &Path, changes: &[YamlRepairChange], persisted: bool) -> String {
+    let display_path = format_display_path(path);
+    let mode_note = if persisted {
+        "persisted to disk"
+    } else {
+        "in-memory only; file on disk was not modified"
+    };
+
+    let mut out = format!(
+        "[WinPie:CONFIG] Auto-repaired {} unescaped Windows path(s) in {} ({}):",
+        changes.len(),
+        display_path,
+        mode_note
+    );
+
+    for c in changes {
+        out.push_str(&format!(
+            "\n  Line {}: {}\n    - before: {}\n    + after : {}",
+            c.line_number, c.reason, c.original, c.repaired
+        ));
+    }
+
+    if !persisted {
+        out.push_str("\n  Tip: Run `winpie --repair` to write these fixes to disk permanently (or use single quotes '...').");
+    }
+
+    out
+}
+
 /// Automatically sanitizes common YAML string escaping issues, particularly Windows paths
 /// with unescaped backslashes inside double quotes (e.g. "C:\Users\..." triggering \U escape errors).
 /// Note: Single-quoted YAML strings ('...') already treat backslashes literally and are never modified.
-pub fn sanitize_yaml_string(input: &str) -> (String, Vec<usize>) {
-    let mut fixed_lines = Vec::new();
+pub fn sanitize_yaml_string_detailed(input: &str) -> YamlRepairResult {
+    let mut changes = Vec::new();
     let mut output_lines = Vec::new();
+    let line_ending = if input.contains("\r\n") { "\r\n" } else { "\n" };
 
     for (line_idx, line) in input.lines().enumerate() {
         let line_num = line_idx + 1;
@@ -188,8 +241,14 @@ pub fn sanitize_yaml_string(input: &str) -> (String, Vec<usize>) {
                         }
 
                         if modified {
-                            fixed_lines.push(line_num);
-                            output_lines.push(format!("{}{}{}", before, sanitized_inside, after));
+                            let repaired_line = format!("{}{}{}", before, sanitized_inside, after);
+                            changes.push(YamlRepairChange {
+                                line_number: line_num,
+                                original: line.trim().to_string(),
+                                repaired: repaired_line.trim().to_string(),
+                                reason: "Escaped single backslashes (\\ -> \\\\) in double-quoted Windows path".to_string(),
+                            });
+                            output_lines.push(repaired_line);
                             continue;
                         }
                     }
@@ -199,25 +258,41 @@ pub fn sanitize_yaml_string(input: &str) -> (String, Vec<usize>) {
         output_lines.push(line.to_string());
     }
 
-    let mut result = output_lines.join("\n");
+    let mut result = output_lines.join(line_ending);
     if input.ends_with('\n') {
-        result.push('\n');
+        result.push_str(line_ending);
     }
-    (result, fixed_lines)
+    YamlRepairResult {
+        sanitized: result,
+        changes,
+    }
+}
+
+/// Automatically sanitizes common YAML string escaping issues, returning `(sanitized_yaml, fixed_line_numbers)`.
+pub fn sanitize_yaml_string(input: &str) -> (String, Vec<usize>) {
+    let res = sanitize_yaml_string_detailed(input);
+    let fixed_lines = res.changes.iter().map(|c| c.line_number).collect();
+    (res.sanitized, fixed_lines)
 }
 
 /// Parses YAML string into AppConfig with automatic unescaped Windows path repair.
-/// Returns Ok((AppConfig, auto_fixed_lines)) or Err(detailed_error_message).
-pub fn parse_app_config(content: &str) -> Result<(AppConfig, Vec<usize>), String> {
+/// Returns `Ok((AppConfig, YamlRepairResult))` or `Err(detailed_error_message)`.
+pub fn parse_app_config_detailed(content: &str) -> Result<(AppConfig, YamlRepairResult), String> {
     // 1. First attempt direct parse
     match serde_yaml::from_str::<AppConfig>(content) {
-        Ok(cfg) => Ok((cfg, Vec::new())),
+        Ok(cfg) => Ok((
+            cfg,
+            YamlRepairResult {
+                sanitized: content.to_string(),
+                changes: Vec::new(),
+            },
+        )),
         Err(orig_err) => {
             // 2. Attempt auto-repair on failure
-            let (sanitized, fixed_lines) = sanitize_yaml_string(content);
-            if !fixed_lines.is_empty() {
-                if let Ok(cfg) = serde_yaml::from_str::<AppConfig>(&sanitized) {
-                    return Ok((cfg, fixed_lines));
+            let repair = sanitize_yaml_string_detailed(content);
+            if !repair.changes.is_empty() {
+                if let Ok(cfg) = serde_yaml::from_str::<AppConfig>(&repair.sanitized) {
+                    return Ok((cfg, repair));
                 }
             }
 
@@ -258,27 +333,49 @@ pub fn parse_app_config(content: &str) -> Result<(AppConfig, Vec<usize>), String
     }
 }
 
+/// Parses YAML string into AppConfig with automatic unescaped Windows path repair.
+/// Returns Ok((AppConfig, auto_fixed_lines)) or Err(detailed_error_message).
+pub fn parse_app_config(content: &str) -> Result<(AppConfig, Vec<usize>), String> {
+    parse_app_config_detailed(content).map(|(cfg, repair)| {
+        let lines = repair.changes.iter().map(|c| c.line_number).collect();
+        (cfg, lines)
+    })
+}
+
+/// Validates and persistently repairs unescaped Windows paths in the given YAML configuration file.
+pub fn repair_config_file(path: &Path) -> Result<YamlRepairResult, String> {
+    let content = fs::read_to_string(path)
+        .map_err(|e| format!("Failed to read {}: {}", format_display_path(path), e))?;
+
+    let (_cfg, repair) = parse_app_config_detailed(&content)?;
+    if !repair.changes.is_empty() {
+        fs::write(path, &repair.sanitized)
+            .map_err(|e| format!("Failed to write {}: {}", format_display_path(path), e))?;
+    }
+    Ok(repair)
+}
+
 impl AppConfig {
     /// Discovers config file path and loads it. Returns (AppConfig, Option<PathBuf>).
     pub fn discover_and_load() -> (Self, Option<PathBuf>) {
         if let Some(path) = discover_config_path() {
             if let Ok(content) = fs::read_to_string(&path) {
-                match parse_app_config(&content) {
-                    Ok((cfg, fixed_lines)) => {
-                        if !fixed_lines.is_empty() {
-                            crate::diagnostics::log_raw(&format!(
-                                "[WinPie:CONFIG] Auto-repaired unescaped Windows path(s) at line(s) {:?} in {}",
-                                fixed_lines,
-                                path.display()
+                match parse_app_config_detailed(&content) {
+                    Ok((cfg, repair)) => {
+                        if !repair.changes.is_empty() {
+                            crate::diagnostics::log_raw(&format_repair_summary(
+                                &path,
+                                &repair.changes,
+                                false,
                             ));
                         }
                         return (cfg, Some(path));
                     }
                     Err(e) => {
-                        eprintln!("[WinPie] Error parsing YAML from {}: {}", path.display(), e);
+                        eprintln!("[WinPie] Error parsing YAML from {}: {}", format_display_path(&path), e);
                         crate::diagnostics::log_raw(&format!(
                             "[WinPie] Error parsing YAML from {}: {}",
-                            path.display(),
+                            format_display_path(&path),
                             e
                         ));
                         return (Self::default(), Some(path));
