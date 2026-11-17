@@ -15,7 +15,9 @@ daemon:
   # When true, WinPie will re-launch itself with Administrator privileges on startup
   # (via Windows UAC "runas" prompt). This allows the low-level keyboard hook to
   # intercept Win+Esc even when elevated windows (Task Manager, elevated terminals,
-  # Registry Editor, etc.) have foreground focus. (default: false)
+  # Registry Editor, etc.) have foreground focus.
+  # Note: Launched commands are still spawned non-elevated (Medium Integrity) by default
+  # unless explicitly marked with `admin:` or `run_as_admin: true`. (default: false)
   run_as_admin: false
 
 # ------------------------------------------------------------------------------
@@ -99,6 +101,10 @@ wheel:
 
   # Direct system command lines spawned asynchronously on sector commit.
   # If a sector defines a submenu in `menus`, the submenu takes precedence.
+  # Supported prefixes:
+  # - `ps: <script>`     Run inline PowerShell command
+  # - `admin: <command>` Run this specific command elevated (Admin / UAC)
+  # Note: Commands without `admin:` always run non-elevated (Medium Integrity) by default.
   commands:
     NE: "cmd.exe /c start https://google.com"
     E: "sublime.exe"
@@ -122,6 +128,7 @@ wheel:
           label: "VS Code"
           tooltip: "Launch Visual Studio Code"
           command: "code.exe"
+          # Optional: run_as_admin: true (launch this item elevated)
         s:
           label: "Sublime Text"
           tooltip: "Launch Sublime Text editor"

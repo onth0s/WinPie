@@ -183,13 +183,13 @@ fn test_modal_menu_spawn_and_keyup_execution() {
         label: "VS Code".to_string(),
         tooltip: Some("Launch VS Code".to_string()),
         command: Some("code.exe".to_string()),
-        menu: None,
+        ..Default::default()
     });
     items.insert('s', MenuItem {
         label: "Sublime".to_string(),
         tooltip: None,
         command: Some("sublime.exe".to_string()),
-        menu: None,
+        ..Default::default()
     });
 
     let menu = MenuDefinition {
@@ -232,7 +232,7 @@ fn test_modal_menu_drill_down_tab_loop_and_shift_tab() {
         label: "Cargo Clean".to_string(),
         tooltip: None,
         command: Some("cargo clean".to_string()),
-        menu: None,
+        ..Default::default()
     });
 
     let child_menu = MenuDefinition {
@@ -247,6 +247,7 @@ fn test_modal_menu_drill_down_tab_loop_and_shift_tab() {
         tooltip: None,
         command: None,
         menu: Some(child_menu.clone()),
+        ..Default::default()
     });
 
     let root_menu = MenuDefinition {
@@ -294,7 +295,7 @@ fn test_modal_menu_cancel_on_esc_and_rmb() {
         label: "Test".to_string(),
         tooltip: None,
         command: Some("test.exe".to_string()),
-        menu: None,
+        ..Default::default()
     });
 
     let menu = MenuDefinition {
@@ -330,13 +331,13 @@ fn test_modal_menu_mouse_hover_and_click() {
         label: "VS Code".to_string(),
         tooltip: Some("Launch VS Code".to_string()),
         command: Some("code.exe".to_string()),
-        menu: None,
+        ..Default::default()
     });
     items.insert('t', MenuItem {
         label: "Terminal".to_string(),
         tooltip: Some("Open Terminal".to_string()),
         command: Some("wt.exe".to_string()),
-        menu: None,
+        ..Default::default()
     });
 
     let menu = MenuDefinition {

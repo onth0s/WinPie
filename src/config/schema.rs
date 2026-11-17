@@ -24,6 +24,8 @@ pub struct MenuItem {
     #[serde(default)]
     pub command: Option<String>,
     #[serde(default)]
+    pub run_as_admin: bool,
+    #[serde(default)]
     pub menu: Option<MenuDefinition>,
 }
 
@@ -49,6 +51,8 @@ pub struct CommandNode {
     pub icon: Option<String>,
     #[serde(default)]
     pub command: Option<String>,
+    #[serde(default)]
+    pub run_as_admin: bool,
     #[serde(default)]
     pub children: HashMap<char, CommandNode>,
 }
@@ -92,6 +96,7 @@ impl From<&MenuItem> for CommandNode {
             tooltip: item.tooltip.clone(),
             icon: None,
             command: item.command.clone(),
+            run_as_admin: item.run_as_admin,
             children: HashMap::new(),
         };
         if let Some(ref m) = item.menu {
@@ -123,6 +128,7 @@ impl From<&CommandNode> for MenuItem {
             label: node.label.clone(),
             tooltip: node.tooltip.clone(),
             command: node.command.clone(),
+            run_as_admin: node.run_as_admin,
             menu,
         }
     }
@@ -355,6 +361,7 @@ impl WheelConfig {
                 tooltip: menu.tooltip.clone(),
                 icon: None,
                 command: None,
+                run_as_admin: false,
                 children: items,
             });
         }
@@ -366,6 +373,7 @@ impl WheelConfig {
                 tooltip,
                 icon: None,
                 command: Some(cmd.clone()),
+                run_as_admin: false,
                 children: HashMap::new(),
             });
         }

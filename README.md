@@ -40,7 +40,7 @@ WinPie provides global, focus-preserving radial menu invocation anchored to the 
 - **Live Context & Profile Inspector**:
   - Run `winpie inspect` in any terminal to live-stream active window detection (Executable, Path, Window Class, Title), matched profile rules, and active sector overrides as you switch focus between applications.
 - **Command-Line Lifecycle & Single-Instance Daemon**:
-  - `winpie` operates both as a background daemon (with single-instance Mutex protection) and as a CLI control tool (`winpie kill`, `winpie reload`, `winpie status`, `winpie inspect`, `winpie autostart`).
+  - `winpie` operates both as a background daemon (with single-instance Mutex protection) and as a CLI control tool (`winpie kill`, `winpie reload`, `winpie status`, `winpie inspect`, `winpie --repair`, `winpie autostart`).
 - **Zero-Latency Dynamic Hot-Reloading**:
   - Automatically monitors `config.yaml` file modification timestamps upon activation (<kbd>Win</kbd> + <kbd>Esc</kbd>).
   - Editing keybindings, colors, commands, or profiles takes effect instantly in real-time. No rebuild or manual daemon restart is required.
@@ -63,6 +63,7 @@ USAGE:
   winpie reload [debug]        Restart WinPie with updated config (optionally stream logs)
   winpie status                Check if WinPie is currently running
   winpie inspect               Live stream active window context & profile matching
+  winpie --repair              Persistently auto-repair unescaped Windows paths in config.yaml
   winpie autostart enable      Launch WinPie automatically on Windows login
   winpie autostart disable     Remove WinPie from Windows startup
   winpie autostart status      Check Windows startup shortcut status
@@ -180,6 +181,10 @@ wheel:
     SW: "Open Media / Music player"
     W: "Open Task Manager"
     NW: "Open Communications / Chat"
+  # Direct system command lines spawned asynchronously on sector commit.
+  # Supports `ps: <script>` for PowerShell and `admin: <cmd>` for per-command elevation.
+  # Normal commands always run non-elevated (Medium Integrity) by default, even when
+  # `daemon.run_as_admin: true` is enabled.
   commands:
     NE: "cmd.exe /c start https://google.com"
     E: "sublime.exe"

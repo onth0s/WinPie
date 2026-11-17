@@ -249,7 +249,11 @@ impl InteractionFsm {
                             *highlighted_key = None;
                             return InteractionEffect::MenuDrillDown { menu: child };
                         } else if let Some(cmd) = &item.command {
-                            let command = cmd.clone();
+                            let command = if item.run_as_admin && !cmd.trim_start().starts_with("admin:") {
+                                format!("admin: {}", cmd)
+                            } else {
+                                cmd.clone()
+                            };
                             let label = item.label.clone();
                             self.state = if keys_held { State::WaitRelease } else { State::Idle };
                             return InteractionEffect::MenuExecuted { command, label };
@@ -273,7 +277,11 @@ impl InteractionFsm {
                                 *highlighted_key = None;
                                 return InteractionEffect::MenuDrillDown { menu: child };
                             } else if let Some(cmd) = &item.command {
-                                let command = cmd.clone();
+                                let command = if item.run_as_admin && !cmd.trim_start().starts_with("admin:") {
+                                    format!("admin: {}", cmd)
+                                } else {
+                                    cmd.clone()
+                                };
                                 let label = item.label.clone();
                                 self.state = if keys_held { State::WaitRelease } else { State::Idle };
                                 return InteractionEffect::MenuExecuted { command, label };
