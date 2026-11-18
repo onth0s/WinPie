@@ -281,6 +281,7 @@ impl Application {
         self.active_invocation = Some(inv);
 
         let effect = self.fsm.transition(InteractionEvent::WinEscDown(visual_center));
+        self.fsm.set_activation_origin(anchor);
         self.sync_input_state();
         if let InteractionEffect::Activated { anchor: eff_anchor } = effect {
             self.diagnostics.log_activate(eff_anchor);

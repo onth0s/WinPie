@@ -56,10 +56,14 @@ pub enum InteractionEffect {
     Rearmed,
 }
 
+const MIN_MOVE_TO_ARM_PX: f64 = 8.0;
+
 #[derive(Debug, Clone)]
 pub struct InteractionFsm {
     pub state: State,
     pub config: GeometryConfig,
+    origin_cursor: Point,
+    armed: bool,
 }
 
 impl InteractionFsm {
@@ -67,7 +71,15 @@ impl InteractionFsm {
         Self {
             state: State::Idle,
             config,
+            origin_cursor: Point::default(),
+            armed: false,
         }
+    }
+
+    /// Sets the raw physical cursor position at activation (used when the visual wheel center
+    /// was clamped away from a screen edge so we don't prematurely arm/commit before pointer motion).
+    pub fn set_activation_origin(&mut self, origin: Point) {
+        self.origin_cursor = origin;
     }
 
     pub fn is_active(&self) -> bool {
@@ -122,6 +134,8 @@ impl InteractionFsm {
     pub fn transition(&mut self, event: InteractionEvent) -> InteractionEffect {
         match (&mut self.state, event) {
             (State::Idle | State::WaitRelease, InteractionEvent::WinEscDown(anchor)) => {
+                self.origin_cursor = anchor;
+                self.armed = false;
                 self.state = State::Active {
                     anchor,
                     hover: None,
@@ -140,6 +154,15 @@ impl InteractionFsm {
             }
 
             (State::Active { anchor, hover }, InteractionEvent::MouseMove(cursor)) => {
+                if !self.armed {
+                    let dx = (cursor.x - self.origin_cursor.x) as f64;
+                    let dy = (cursor.y - self.origin_cursor.y) as f64;
+                    if dx * dx + dy * dy < MIN_MOVE_TO_ARM_PX * MIN_MOVE_TO_ARM_PX {
+                        return InteractionEffect::None;
+                    }
+                    self.armed = true;
+                }
+
                 let anchor_pt = *anchor;
                 let current_hover = *hover;
                 let new_hover = evaluate_hover(anchor_pt, cursor, &self.config);
@@ -173,9 +196,14 @@ impl InteractionFsm {
                 }
             }
 
-            // On Win release: if cursor is in valid bounds, commit; otherwise cancel
-            (State::Active { anchor, .. }, InteractionEvent::WinUp(cursor, keys_held)) => {
+            // On Win release: only commit if a sector has actually been hovered/accented and cursor is in valid bounds
+            (State::Active { anchor, hover }, InteractionEvent::WinUp(cursor, keys_held)) => {
                 let anchor_pt = *anchor;
+                let has_hover = hover.is_some();
+                if !has_hover || !self.armed {
+                    self.state = if keys_held { State::WaitRelease } else { State::Idle };
+                    return InteractionEffect::Cancelled;
+                }
                 let resolution = evaluate_commit(anchor_pt, cursor, &self.config);
                 match resolution {
                     Resolution::Commit(sector) => {

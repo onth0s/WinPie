@@ -50,16 +50,51 @@ fn test_at_005a_win_release_commit() {
     let anchor = Point::new(200, 200);
     fsm.transition(InteractionEvent::WinEscDown(anchor));
 
-    // Release Win while cursor is in valid sector (e.g. East at 260, 200) with no keys remaining -> IDLE
+    // Move cursor into valid sector (East at 260, 200) so accent triggers, then release Win -> IDLE
+    let hover_eff = fsm.transition(InteractionEvent::MouseMove(Point::new(260, 200)));
+    assert_eq!(hover_eff, InteractionEffect::HoverChanged { from: None, to: Some(Sector::E) });
     let eff = fsm.transition(InteractionEvent::WinUp(Point::new(260, 200), false));
     assert_eq!(eff, InteractionEffect::Committed(Sector::E));
     assert_eq!(fsm.state, State::Idle);
 
     // Release Win while cursor in valid sector with Esc still held -> WAIT_RELEASE
     fsm.transition(InteractionEvent::WinEscDown(anchor));
+    fsm.transition(InteractionEvent::MouseMove(Point::new(260, 200)));
     let eff = fsm.transition(InteractionEvent::WinUp(Point::new(260, 200), true));
     assert_eq!(eff, InteractionEffect::Committed(Sector::E));
     assert_eq!(fsm.state, State::WaitRelease);
+}
+
+#[test]
+fn test_edge_invocation_requires_movement_and_hover_before_winup_commit() {
+    let mut fsm = InteractionFsm::new(GeometryConfig::default());
+    // Edge invocation: raw cursor at (100, 100), clamped visual center at (200, 200).
+    // (100, 100) is already in Sector::NW relative to (200, 200), but user hasn't moved yet.
+    let raw_cursor = Point::new(100, 100);
+    let clamped_center = Point::new(200, 200);
+    fsm.transition(InteractionEvent::WinEscDown(clamped_center));
+    fsm.set_activation_origin(raw_cursor);
+
+    // 1. Sub-threshold jitter (< 8px) must NOT trigger accent or arm commit
+    let jitter = fsm.transition(InteractionEvent::MouseMove(Point::new(103, 102)));
+    assert_eq!(jitter, InteractionEffect::None);
+    assert_eq!(fsm.hover_selection(), None);
+
+    // Releasing Win before accent triggers must Cancel, not commit unprompted
+    let cancel_eff = fsm.transition(InteractionEvent::WinUp(Point::new(103, 102), false));
+    assert_eq!(cancel_eff, InteractionEffect::Cancelled);
+    assert_eq!(fsm.state, State::Idle);
+
+    // 2. Re-activate at edge, then move >= 8px so accent triggers -> WinUp commits
+    fsm.transition(InteractionEvent::WinEscDown(clamped_center));
+    fsm.set_activation_origin(raw_cursor);
+    let hover_eff = fsm.transition(InteractionEvent::MouseMove(Point::new(90, 90)));
+    assert_eq!(hover_eff, InteractionEffect::HoverChanged { from: None, to: Some(Sector::NW) });
+    assert_eq!(fsm.hover_selection(), Some(Sector::NW));
+
+    let commit_eff = fsm.transition(InteractionEvent::WinUp(Point::new(90, 90), false));
+    assert_eq!(commit_eff, InteractionEffect::Committed(Sector::NW));
+    assert_eq!(fsm.state, State::Idle);
 }
 
 #[test]
